@@ -6,7 +6,7 @@
 - 목표: bash/zsh처럼 명령어를 실행하고, 백그라운드 프로세스를 
   자체적으로 관리/모니터링하는 미니 쉘을 C언어로 구현
 - 실행 시 프롬프트: `TUK-OS > `
-- 개발 환경: Linux(Ubuntu 기준), clang, POSIX 시스템콜(fork, execvp, waitpid 등) 사용
+- 개발 환경: Linux(Ubuntu 기준), gcc, POSIX 시스템콜(fork, execvp, waitpid 등) 사용
 
 ## 필수 구현 항목
 
@@ -44,16 +44,6 @@
 파일을 파싱해서 출력하는 형태로 구현하고, 추후 API 연동 확장이 가능하도록 
 함수 인터페이스를 분리해서 설계한다.)
 
-### 7. 바탕화면 통합 투명 터미널 UI (UI Launcher)
-
-C언어 쉘 런타임 외곽의 리눅스 GUI(X11/GNOME 등)를 제어하는 쉘 스크립트(launcher.sh) 작성.
-
-wmctrl, xprop, gsettings 등의 명령어를 활용하여 터미널 실행 시 타이틀 바(Title bar)와 창 테두리(Border)를 제거.
-
-터미널 배경을 투명하게 설정하여 윈도우 바탕화면의 위젯이나 WinUI처럼 자연스럽게 융화되도록 구현.
-
-TUK-Shell의 진입점(Entry point) 역할을 수행.
-
 - **`schedule`**
   - 인자 없이 입력 시 AI소프트웨어학과의 시간표를 CLI 표 형태로 출력
 
@@ -63,7 +53,7 @@ TUK-Shell의 진입점(Entry point) 역할을 수행.
 
 - **`bob`** (학식/식당 메뉴)
   - `-t` : TIP 지하 식당 식단 출력
-  - `-e` : E동 레스토랑 시간표 출력
+  - `-E` : E동 레스토랑 시간표 출력
   - `-d` : 대신식당 식단 출력
 
 - **`notice`** (학교 공지사항)
@@ -100,7 +90,6 @@ TUK-Shell의 진입점(Entry point) 역할을 수행.
 6단계: 히스토리 파일 입출력 추가
 7단계: 캠퍼스 특화 커스텀 명령어(schedule, bus, bob, notice, map, weather, contact) 
    추가 (더미 데이터 기반으로 우선 구현 후 필요 시 실데이터/파일 연동으로 확장)
-8단계: 바탕화면 통합 투명/보더리스 UI 적용 (Launcher 스크립트 작성 및 최종 연동)
 
 ## 요청 방식
 - 한 번에 전체 코드를 몰아서 주지 말고, 단계별로 코드를 보여주면서 

@@ -1,1 +1,4 @@
-.agents/
+./agents
+.agents/karpathy-guidelines/SKILL.md
+.agents/CLAUDE.md
+./agents/karpathy-guidelines/

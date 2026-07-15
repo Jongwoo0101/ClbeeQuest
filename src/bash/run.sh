@@ -7,8 +7,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/tuk_shell"
 
-echo "[build] gcc -Wall -Wextra -o tuk_shell src/bash/*.c"
-gcc -Wall -Wextra -o "$BIN" "$SCRIPT_DIR"/*.c
+echo "[build] make -C $SCRIPT_DIR"
+make -C "$SCRIPT_DIR"
 
 echo "[run] $BIN"
 exec "$BIN"

@@ -1,6 +1,8 @@
 #ifndef TUK_COMMANDS_H
 #define TUK_COMMANDS_H
 
+#include "tuk_shell.h" /* TUK_SHELL_EXIT */
+
 /*
  * commands.h - 내장 명령어 핸들러 및 명령 분기 인터페이스 [우진]
  *
@@ -10,10 +12,9 @@
  *
  * execute_command() 반환 규약 (02 4-1):
  *  - 정상 처리 0 / 사용법 오류 1 / 치명적 오류 -1
- *  - TUK_SHELL_EXIT(2)는 본 파트의 확장 규약으로, exit 내장 명령이
- *    정상 수리되어 REPL 루프를 종료해야 함을 main.c에 알린다.
+ *  - TUK_SHELL_EXIT(2)는 본 파트의 확장 규약(tuk_shell.h)으로, exit 내장
+ *    명령이 정상 수리되어 REPL 루프를 종료해야 함을 main.c에 알린다.
  */
-#define TUK_SHELL_EXIT 2
 
 /*
  * 백그라운드 등록 시 ProcessInfo.command에 보관할 "사용자 입력 원본

@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "campus.h"
+#include "executor.h"
 #include "parser.h"
 #include "process.h"
 

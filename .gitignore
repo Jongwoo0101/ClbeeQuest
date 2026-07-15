@@ -5,3 +5,5 @@
 .agents/skills 
 .agents/AGENTS.md
 
+src/bash/tuk_shell
+src/bash/build/

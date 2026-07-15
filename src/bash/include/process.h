@@ -4,15 +4,17 @@
 #include <sys/types.h>
 #include <time.h>
 
-#include "parser.h" /* MAX_INPUT_LENGTH: 원본 명령 문자열 보관 용량 */
+#include "tuk_shell.h" /* MAX_INPUT_LENGTH: 원본 명령 문자열 보관 용량 */
 
 /*
- * process.h - ProcessInfo 구조체 및 연결 리스트, 외부 명령 실행 [공통]
+ * process.h - ProcessInfo 구조체 및 연결 리스트 관리 [공통]
  *
  * 근거 문서:
  *  - 01_상세기능명세서 3장 (구조체 필드, 상태값, 메모리 관리 규칙)
  *  - 02_인터페이스명세서 4-3, 4-4 (함수 시그니처 고정)
- *  - 03_파이프라인명세서 4~5장 (실행/상태 갱신 파이프라인)
+ *  - 03_파이프라인명세서 5장 (상태 갱신 파이프라인)
+ *
+ * 외부 명령 실행(fork/execvp)은 executor.h로 분리했다.
  */
 
 #define PROCESS_NAME_MAX 64
@@ -52,14 +54,6 @@ int refresh_all_processes(ProcessInfo **head);
 
 /* 03 9장: exit/EOF 시 남은 노드 전체 해제 */
 void free_all_processes(ProcessInfo **head);
-
-/*
- * 외부 명령 실행 (02 3-4): fork() 후 자식은 execvp(),
- * 포그라운드는 waitpid(...,0) 대기, 백그라운드는 리스트 등록 후 즉시 복귀.
- * 반환: 정상 0 / 치명적 오류(fork·등록 실패) -1
- */
-int run_external_command(char **argv, int background_flag,
-                         const char *raw_command);
 
 /* 상태 enum -> 출력용 문자열 ("RUNNING" 등) */
 const char *process_status_string(ProcessStatus status);

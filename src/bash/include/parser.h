@@ -3,28 +3,15 @@
 
 #include <stddef.h>
 
+#include "tuk_shell.h" /* MAX_INPUT_LENGTH, TUK_COLOR_*, READ_* 등 공용 상수 */
+
 /*
- * parser.h - 입력 파싱 인터페이스 및 프로젝트 공용 입출력 규격 상수 [우진]
+ * parser.h - 입력 파싱 인터페이스 [우진]
  *
- * 05_개발철칙명세서 1-2의 파일 구성에는 별도 공용 헤더가 없으므로,
- * 입력 제약 상수(05 4-2)와 TUK 색상 규격(plan.md UI/UX)을 입력 규격의
- * 소유자인 parser.h에 정의하여 모든 모듈이 공유한다.
+ * 근거 문서: 01_상세기능명세서 4장, 02_인터페이스명세서 2장,
+ *           03_파이프라인명세서 3장
+ * 공용 상수(입력 제약, TUK 색상, 반환 코드)는 tuk_shell.h로 이전했다.
  */
-
-/* 02_인터페이스명세서 2-1: 입력 버퍼 및 토큰 배열 제약 상수 */
-#define MAX_INPUT_LENGTH 1024
-#define MAX_ARGS 64
-
-/* plan.md UI/UX: 한국공학대학교 핵심 색상 (ANSI True Color) */
-#define TUK_COLOR_BLUE  "\x1b[38;2;23;88;168m"  /* TU BLUE     #1758A8 */
-#define TUK_COLOR_SKY   "\x1b[38;2;6;143;211m"  /* TU SKY BLUE #068FD3 */
-#define TUK_COLOR_MINT  "\x1b[38;2;1;179;205m"  /* TU MINT     #01B3CD */
-#define TUK_COLOR_RESET "\x1b[0m"
-
-/* read_input_line() 반환값 */
-#define READ_OK 0
-#define READ_EOF (-1)
-#define READ_OVERFLOW 1
 
 /* 01_상세기능명세서 4-1: TU BLUE 고정 프롬프트 "TUK-OS > " 출력 */
 void print_prompt(void);

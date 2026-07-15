@@ -20,9 +20,9 @@
 
 각 팀원은 본인의 주력 호스트 쉘 위에서 TUK-Shell이 완벽하게 호환 및 구동되도록 각자의 환경에서 구현과 테스트를 분담한다.
 
-* **우진 (BASH):** Bash 환경에서의 기본 REPL 루프 및 내장 명령어 파싱 테스트
-* **원종우 (ZSH):** Zsh 환경에서의 구조체 관리 및 TUK 캠퍼스 특화 커스텀 명령어 테스트
-* **동현 (POWERSHELL):** Windows PowerShell + WSL(Ubuntu) 환경에서의 프로세스 관리(fork/exec), 시스템 콜 연동 및 `/proc` 파일 시스템 파싱 테스트
+* **우진 (BASH):** Bash 환경에서의 TUK-SHELL 구현
+* **원종우 (ZSH):** Zsh 환경에서의 TUK-SHELL 구현
+* **동현 (POWERSHELL):** Windows PowerShell + WSL(Ubuntu) 환경에서의 TUK-SHELL
 
 ## 3. 필수 구현 항목
 

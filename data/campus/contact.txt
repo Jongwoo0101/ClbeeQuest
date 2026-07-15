@@ -1,0 +1,21 @@
+# contact.txt - 연락처
+# PROF|name|dept|office|phone|email
+# DEPT|name|phone|location
+# EMERG|name|phone
+PROF|김민석|AI소프트웨어학과|E동 402|031-8041-1101|mskim@tukorea.ac.kr
+PROF|박서준|AI소프트웨어학과|E동 403|031-8041-1102|sjpark@tukorea.ac.kr
+PROF|정우진|AI소프트웨어학과|E동 404|031-8041-1103|wjjung@tukorea.ac.kr
+PROF|이하늘|AI소프트웨어학과|E동 405|031-8041-1104|hnlee@tukorea.ac.kr
+PROF|최윤아|AI소프트웨어학과|E동 406|031-8041-1105|yachoi@tukorea.ac.kr
+PROF|한지훈|AI소프트웨어학과|E동 407|031-8041-1106|jhhan@tukorea.ac.kr
+PROF|오세연|AI소프트웨어학과|E동 408|031-8041-1107|syoh@tukorea.ac.kr
+DEPT|학사지원팀|031-8041-2001|A동 1층
+DEPT|장학복지팀|031-8041-2002|A동 1층
+DEPT|학생상담센터|031-8041-2003|F동 2층
+DEPT|국제교류팀|031-8041-2004|A동 2층
+DEPT|산학협력단|031-8041-2005|산학협력관 3층
+EMERG|교내 보건실|031-8041-3001
+EMERG|교내 경비실(24시간)|031-8041-3002
+EMERG|시설안전팀|031-8041-3003
+EMERG|119 (소방/구급)|119
+EMERG|112 (경찰)|112

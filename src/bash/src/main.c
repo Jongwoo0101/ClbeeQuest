@@ -11,6 +11,7 @@
 #include "history.h"
 #include "parser.h"
 #include "process.h"
+#include "tuk_shell.h" /* TUK_COLOR_SKY: 종료 알림 색상 */
 
 /* 02_인터페이스명세서 4-1: REPL 루프. 쉘 종료 코드를 반환한다. */
 int shell_loop(void)
@@ -62,6 +63,10 @@ int main(void)
     history_init();
 
     int exit_code = shell_loop();
+
+    /* 02 7장 크로스쉘 정합: ZSH 파트와 동일한 종료 알림.
+     * exit/EOF 양쪽 경로를 모두 커버하며 색상은 종료 알림용 TU SKY BLUE (05 4-1) */
+    printf(TUK_COLOR_SKY "TUK-Shell을 종료합니다." TUK_COLOR_RESET "\n");
 
     /* 03 9장 종료 파이프라인: 리스트 노드 해제 -> 히스토리 flush/close */
     free_all_processes(&g_process_list);

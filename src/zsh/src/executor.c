@@ -81,7 +81,7 @@ int execute_command(int argc, char **argv, int background_flag, const char *raw_
             fprintf(stderr, "built-in command cannot run in background\n");
             return 1;
         }
-        return execute_builtin(argc, argv, should_exit);
+        return execute_builtin(argc, argv, should_exit, job_list);
     }
 
     return execute_external(argv, background_flag, raw_command, job_list);

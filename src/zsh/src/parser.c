@@ -47,3 +47,23 @@ int parse_command(char *line, char **argv, int *background_flag)
 
     return argc;
 }
+
+void strip_background_marker(char *raw_line, int background_flag)
+{
+    size_t len;
+
+    if (!background_flag || raw_line == NULL) {
+        return;
+    }
+
+    len = strlen(raw_line);
+    while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+        raw_line[--len] = '\0';
+    }
+    if (len > 0 && raw_line[len - 1] == '&') {
+        raw_line[--len] = '\0';
+        while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+            raw_line[--len] = '\0';
+        }
+    }
+}

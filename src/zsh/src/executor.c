@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include "executor.h"
 #include "commands.h"
+#include "process.h"
 #include "tuk_shell.h"
 
 /*
@@ -11,8 +12,10 @@
  *  - fork() 후 자식은 execvp()로 프로그램 교체.
  *  - execvp 실패 시 자식은 perror + exit(1)만 하고, 부모 자원(리스트/히스토리 등)에는
  *    절대 접근하지 않는다 (05_개발철칙명세서.md 3-2 "자식 프로세스 에러 전파 차단").
+ *  - 백그라운드 실행 시 ProcessInfo 노드를 생성해 job_list에 등록한다 (2단계).
  */
-static int execute_external(char **argv, int background_flag)
+static int execute_external(char **argv, int background_flag, const char *raw_command,
+                             ProcessInfo **job_list)
 {
     pid_t pid;
     int status;
@@ -34,14 +37,19 @@ static int execute_external(char **argv, int background_flag)
 
     /* --- 부모 프로세스 --- */
     if (background_flag) {
-        /*
-         * [1단계 임시 처리 - 03문서 4-4 메시지 포맷 선반영]
-         * ProcessInfo 연결 리스트와 waitpid(WNOHANG) 기반 상태 갱신은
-         * 아직 도입되지 않았다(2단계 예정). 현재는 좀비 프로세스 회수를
-         * 이후 단계로 미루고, PID/명령만 즉시 알린 뒤 REPL로 복귀한다.
-         */
+        ProcessInfo *node = create_process_node(pid, argv, raw_command);
+
+        if (node == NULL) {
+            /* 노드 생성 실패해도 자식 프로세스 자체는 이미 실행 중 - 등록만 실패 처리 */
+            fprintf(stderr, "warning: failed to register background job (pid=%d)\n", (int)pid);
+        } else if (append_process(job_list, node) != 0) {
+            fprintf(stderr, "warning: failed to append background job (pid=%d)\n", (int)pid);
+            free(node); /* 리스트에 들어가지 못한 노드는 즉시 해제 (누수 방지) */
+        }
+
+        /* 시작 메시지 형식 - 03문서 4-4, 색상 TU SKY BLUE */
         printf(TU_SKY_BLUE "[bg] pid=%d command=\"%s\"\n" COLOR_RESET,
-               (int)pid, argv[0]);
+               (int)pid, raw_command);
         return 0;
     }
 
@@ -54,7 +62,8 @@ static int execute_external(char **argv, int background_flag)
     return 0;
 }
 
-int execute_command(int argc, char **argv, int background_flag, int *should_exit)
+int execute_command(int argc, char **argv, int background_flag, const char *raw_command,
+                     int *should_exit, ProcessInfo **job_list)
 {
     *should_exit = 0;
 
@@ -75,5 +84,5 @@ int execute_command(int argc, char **argv, int background_flag, int *should_exit
         return execute_builtin(argc, argv, should_exit);
     }
 
-    return execute_external(argv, background_flag);
+    return execute_external(argv, background_flag, raw_command, job_list);
 }

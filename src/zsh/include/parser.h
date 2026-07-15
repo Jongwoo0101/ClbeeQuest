@@ -17,4 +17,13 @@
  */
 int parse_command(char *line, char **argv, int *background_flag);
 
+/*
+ * strip_background_marker
+ *  - background_flag가 1일 때, raw_line 끝의 '&'와 그 앞 공백을 제거한다.
+ *  - 03_파이프라인명세서.md 4-4의 시작 메시지 포맷(command="sleep 30")이 '&'를
+ *    표시하지 않는 것과 ProcessInfo->command 저장 형식을 일치시키기 위한 용도.
+ *  - background_flag가 0이면 아무 동작도 하지 않는다.
+ */
+void strip_background_marker(char *raw_line, int background_flag);
+
 #endif /* PARSER_H */

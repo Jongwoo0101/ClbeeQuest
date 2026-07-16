@@ -19,7 +19,9 @@ int is_campus_command(const char *name);
 /* [우진] 옵션 검증 후 대응 핸들러 호출. 반환 규약은 핸들러와 동일 */
 int dispatch_campus_command(int argc, char **argv);
 
-/* [타 파트 - 원종우] 캠퍼스 명령 핸들러 (01 9-4 인터페이스 고정) */
+/* 캠퍼스 명령 핸들러 (01 9-4 인터페이스 고정, 모두 [우진] 실데이터 구현)
+ * - notice   : notice.c      (학사공지 게시판 라이브 HTML)
+ * - 그 외 6개: campus_data.c  (data/campus 디렉터리의 .txt) */
 int handle_schedule_command(int argc, char **argv);
 int handle_bus_command(int argc, char **argv);
 int handle_bob_command(int argc, char **argv);

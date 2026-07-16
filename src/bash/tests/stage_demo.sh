@@ -20,6 +20,12 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 
+# 캠퍼스 명령은 임시 작업 디렉터리에서 실행되므로 데이터 경로를 명시한다.
+# notice는 고정 HTML을 주입해 시연을 오프라인·결정론적으로 유지(라이브로 보려면
+# 아래 TUK_NOTICE_FIXTURE 줄을 주석 처리하고 인터넷 연결 상태로 실행).
+export TUK_CAMPUS_DATA="$(cd "$BASH_DIR/../../data/campus" && pwd)"
+export TUK_NOTICE_FIXTURE="$SCRIPT_DIR/fixtures/notice_sample.html"
+
 if [ "${1:-}" = "--no-color" ]; then
     FILTER='sed s/\x1b\[[0-9;]*m//g'
 else
@@ -83,8 +89,8 @@ echo "[1회차 후 .tuk_history]"; cat -n "$WORK/.tuk_history"
 feed 'help\nexit\n' >/dev/null
 echo "[2회차(재시작) 후 .tuk_history — 이력 보존 + append]"; cat -n "$WORK/.tuk_history"
 
-banner "STAGE 7: 캠퍼스 명령 옵션검증 + 디스패치 (mock)"
-feed 'schedule\nbus -1\nbus\nnotice -a -n 3\nnotice -a -g\nmap -find B101\nmap -find\ncontact -e\nexit\n'
+banner "STAGE 7: 캠퍼스 명령 옵션검증 + 실데이터 출력"
+feed 'schedule\nbus -1\nbus\nbob -t\nnotice -a -n 3\nnotice -a -g\nmap -A\nmap -f\nmap -s\nmap -find B101\nmap -find\nweather -c\ncontact -p 김민석\ncontact -e\nexit\n'
 
 banner "내장 예외처리 + 백그라운드 금지 (05 5-3)"
 feed 'cd a b\npwd extra\ncd &\njobs &\nexit\n'

@@ -1,0 +1,15 @@
+--일반학부--
+
+전체 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50
+학사 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50
+비교과 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50   
+장학 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50
+생활관 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50
+일반 : https://www.tukorea.ac.kr/bbs/tukorea/1303/rssList.do?row=50
+
+--조기취업학부--
+공지 : https://contract.tukorea.ac.kr/bbs/contract/607/rssList.do?row=50
+
+--산합협력학부--
+공지 : https://contract.tukorea.ac.kr/bbs/contract/282/rssList.do?row=50
+

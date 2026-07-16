@@ -96,12 +96,14 @@ static int validate_notice(int argc, char **argv)
     return 0;
 }
 
-/* map -A..-G | -f | -find ROOM: -find는 값 필수 (02 3-3) */
+/* map -A..-G | -f | -s | -find ROOM: -find는 값 필수 (02 3-3),
+ * -s(스포츠 플라자)는 정보 페이지 링크 안내 옵션 */
 static int validate_map(int argc, char **argv)
 {
-    static const char *USAGE = "map -A | -B | -C | -D | -E | -F | -G | -f | -find ROOM";
-    static const char *FLOOR_OPTIONS[] = {
-        "-A", "-B", "-C", "-D", "-E", "-F", "-G", "-f",
+    static const char *USAGE =
+        "map -A | -B | -C | -D | -E | -F | -G | -f | -s | -find ROOM";
+    static const char *SINGLE_OPTIONS[] = {
+        "-A", "-B", "-C", "-D", "-E", "-F", "-G", "-f", "-s",
     };
 
     if (argc == 3 && strcmp(argv[1], "-find") == 0) {
@@ -109,8 +111,8 @@ static int validate_map(int argc, char **argv)
     }
     if (argc == 2) {
         for (size_t i = 0;
-             i < sizeof(FLOOR_OPTIONS) / sizeof(FLOOR_OPTIONS[0]); i++) {
-            if (strcmp(argv[1], FLOOR_OPTIONS[i]) == 0) {
+             i < sizeof(SINGLE_OPTIONS) / sizeof(SINGLE_OPTIONS[0]); i++) {
+            if (strcmp(argv[1], SINGLE_OPTIONS[i]) == 0) {
                 return 0;
             }
         }
@@ -190,56 +192,7 @@ int dispatch_campus_command(int argc, char **argv)
     return 1; /* 도달 불가: is_campus_command() 선행 검사 전제 */
 }
 
-/* ============================================================
- * 이하 Mock 핸들러 - [타 파트: 원종우] 실제 구현으로 교체 예정
- *
- * 05 5-1: 소스 병합 전까지 더미 출력으로 대체하여 BASH 파트의
- * 독립 개발/검증을 보장한다. 검증된 옵션을 그대로 되돌려 출력해
- * 옵션 파싱 성공 여부(04 T09)를 확인할 수 있게 한다.
- * 반환 규약(01 9-4): 성공 0 / 사용법 오류 1 / 데이터 로드 실패 -1
- * 출력 색상: TU MINT (05 4-1), 단색 터미널 대비 [mock] 표기 병행
- * ============================================================ */
-static int print_mock_result(const char *command_name, int argc, char **argv)
-{
-    printf(TUK_COLOR_MINT "[mock] %s:", command_name);
-    for (int i = 1; i < argc; i++) {
-        printf(" %s", argv[i]);
-    }
-    printf(" (원종우 파트 더미 데이터 출력 지점)" TUK_COLOR_RESET "\n");
-    return 0;
-}
-
-int handle_schedule_command(int argc, char **argv)
-{
-    return print_mock_result("schedule", argc, argv);
-}
-
-int handle_bus_command(int argc, char **argv)
-{
-    return print_mock_result("bus", argc, argv);
-}
-
-int handle_bob_command(int argc, char **argv)
-{
-    return print_mock_result("bob", argc, argv);
-}
-
-int handle_notice_command(int argc, char **argv)
-{
-    return print_mock_result("notice", argc, argv);
-}
-
-int handle_map_command(int argc, char **argv)
-{
-    return print_mock_result("map", argc, argv);
-}
-
-int handle_weather_command(int argc, char **argv)
-{
-    return print_mock_result("weather", argc, argv);
-}
-
-int handle_contact_command(int argc, char **argv)
-{
-    return print_mock_result("contact", argc, argv);
-}
+/* 캠퍼스 명령 핸들러 실구현은 인터페이스(campus.h)를 고정한 채 별도 모듈에 있다:
+ *  - notice           -> notice.c       (학사공지 게시판 라이브 HTML 파싱)
+ *  - 그 외 6개 핸들러  -> campus_data.c  (data/campus 디렉터리의 .txt 파싱)
+ * 본 파일은 진입점 식별·옵션 검증·디스패치(우진 BASH 책임, 01 9-1)만 담당한다. */

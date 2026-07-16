@@ -144,33 +144,54 @@ usage: top -cpu | -mem | -time
 
 ---
 
-## 7단계: 캠퍼스 특화 명령어 (BASH 파서/디스패치 + 원종우 Mock 핸들러)
+## 7단계: 캠퍼스 특화 명령어 (BASH 파서/디스패치 + 실데이터 핸들러)
 
-**검증 항목**: 진입점 식별, 옵션 검증, 잘못된 옵션 사용법 출력, 핸들러 디스패치
+**검증 항목**: 진입점 식별, 옵션 검증, 잘못된 옵션 사용법 출력, 실데이터 출력
 
 ```text
 TUK-OS > schedule
-[mock] schedule: (원종우 파트 더미 데이터 출력 지점)
+[AI소프트웨어학과 시간표]
+ 월  1-2  09:00-10:50  자료구조 (김민석, E동 302)
+ 월  3-4  11:00-12:50  운영체제 (박서준, E동 305)
+ ... (10개 교시, 생략)
 TUK-OS > bus -1
-[mock] bus: -1 (원종우 파트 더미 데이터 출력 지점)
+[1캠퍼스 셔틀]
+경유: 정문 → 거북섬역 → 1캠퍼스 본관 → 기숙사
+평일 44회: 07:30 07:50 08:10 ... (생략)
+주말 14회: 09:00 09:40 10:20 ... (생략)
 TUK-OS > bus
 usage: bus -1 | -2
 TUK-OS > notice -a -n 3
-[mock] notice: -a -n 3 (원종우 파트 더미 데이터 출력 지점)
+[학사] 최근 3건
+  1. 2026학년도 2학기 수강신청 안내  (2026.07.07)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151455/artclView.do
+  2. 2026년도 국가장학금 2차 신청 안내  (2026.07.03)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151384/artclView.do
+  3. 여름 계절학기 성적 입력 안내 & 유의사항  (2026.06.30)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151336/artclView.do
 TUK-OS > notice -a -g
 usage: notice [-g | -a | -s] [-n N]
 TUK-OS > map -find B101
-[mock] map: -find B101 (원종우 파트 더미 데이터 출력 지점)
+[B101] B동 1층 - 라운지 옆 소강의실
 TUK-OS > map -find
 usage: map -A | -B | -C | -D | -E | -F | -G | -f | -find ROOM
+TUK-OS > weather -c
+[현재 날씨] 거북섬/정왕동 · 2026-07-15
+맑음  최고 33.0℃ / 최저 26.0℃  미세먼지 좋음
 TUK-OS > contact -e
-[mock] contact: -e (원종우 파트 더미 데이터 출력 지점)
+[긴급 연락처]
+ 교내 보건실 · 031-8041-3001
+ 교내 경비실(24시간) · 031-8041-3002
+ ... (생략)
 ```
 
 - `bus`(옵션 누락), `notice -a -g`(분류 옵션 2개), `map -find`(값 누락) → 각 명령어별 사용법 출력
-- `notice -a -n 3` → 허용 조합 파싱 성공 후 핸들러 디스패치
-- 핸들러는 현재 원종우 파트 병합 전 **Mock**(검증된 옵션을 되돌려 출력, TU MINT)
-- **판정**: ✅ 통과 (T09 `notice -a -n 3`, T10 잘못된 옵션)
+- **7개 캠퍼스 명령이 모두 실데이터로 구현됨** (plan.md 6단계 설계 의도: 로컬 파싱 후 출력, API 확장 위해 인터페이스 분리):
+  - `notice` → 학사공지 게시판 라이브 HTML(`src/notice.c`; `artclList.do?bbsOpenWrdSeq=` 학사482/장학484/일반487/전체미지정, 제목·등록일·URL 최신순, `-n N` 제한). 위 예시는 오프라인 고정 입력(`tests/fixtures/notice_sample.html`) 기준이며 실제 실행 시 최신 공지가 표시된다(2026-07 라이브 확인).
+  - `bus/bob/map/weather/contact/schedule` → 로컬 데이터 `data/campus`의 `.txt` 파싱(`src/campus_data.c`; 경로는 `TUK_CAMPUS_DATA` 우선, 미지정 시 `data/campus`→`../../data/campus`).
+  - **자주 바뀌는 정보는 링크 안내**(`data/campus/links.txt`): `bob -t/-E`는 식당별 최신 메뉴 링크(ibook 뷰어), `map -f`는 편의시설 링크, `map -s`(신설)는 스포츠 플라자 링크를 `🔗 …` 줄로 덧붙인다. 대신식당(`bob -d`)은 링크 미확보라 메뉴만 출력. 링크는 보조 출력이라 `links.txt`가 없어도 명령은 정상 동작.
+  - 데이터 로드 실패 시 오류 출력 후 `-1` 반환(9-4), 쉘은 계속 동작. 옵션 사용법 오류는 파서(`campus.c`)가 선처리.
+- **판정**: ✅ 통과 (T09 notice 실데이터 파싱·`-n` 제한·엔티티 디코드, B-단계 6개 명령 실데이터·식당별/편의/스포츠 링크·사용법 오류, T10 잘못된 옵션)
 
 ---
 
@@ -235,15 +256,23 @@ built-in command cannot run in background
 cd src/bash
 make                       # 빌드
 ./tests/stage_demo.sh      # 단계별 시연 출력 재생
-./tests/run_tests.sh ./tuk_shell /tmp/tuk_verify   # 자동 회귀(T01~T10, 52항목)
+./tests/run_tests.sh ./tuk_shell /tmp/tuk_verify   # 자동 회귀(T01~T10, 61항목)
 ```
+
+> `run_tests.sh`는 notice 검증 시 `TUK_NOTICE_FIXTURE`로 고정 HTML을, 나머지 캠퍼스
+> 명령은 `TUK_CAMPUS_DATA`로 리포 `data/campus`를 주입해 네트워크 없이 결정론적으로
+> 검증한다. 라이브 확인은 `notice -a -n 3`(`-s`/`-g`)나 `bus -1`, `weather -c` 등을
+> 직접 실행하면 된다.
 
 ## 남은 Mock 연동 지점
 
 | 지점 | 파일 | 담당 |
 |------|------|------|
-| `/proc` CPU/메모리 파싱 | `src/system_info.c` `update_process_stats()` | 동현 |
-| 캠퍼스 명령 7종 실데이터 | `src/campus.c` `handle_*_command()` | 원종우 |
+| `/proc` CPU/메모리 파싱 | `src/system_info.c` `update_process_stats()` | 동현(PowerShell 파트) |
 
-두 지점 모두 헤더 시그니처와 반환 규약이 고정되어 있어, 실제 구현으로 교체 시
+> 캠퍼스 명령 7종은 모두 실데이터로 구현 완료(`src/notice.c` = 라이브 게시판,
+> `src/campus_data.c` = `data/campus` 로컬 데이터). 남은 Mock은 동현 파트의
+> `/proc` 통계뿐이다.
+
+헤더 시그니처와 반환 규약이 고정되어 있어, 실제 구현으로 교체 시
 BASH 호출부 수정 없이 링크된다.

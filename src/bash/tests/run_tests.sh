@@ -5,6 +5,11 @@ set -u
 BIN="$1"
 WORK="$2"
 
+# 아래에서 WORK로 cd하므로, 데이터 경로를 미리 절대경로로 고정
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FIXTURE_NOTICE="$SCRIPT_DIR/fixtures/notice_sample.html"        # notice 오프라인 입력
+DATA_CAMPUS="$(cd "$SCRIPT_DIR/../../../data/campus" && pwd)"   # bus/bob/map/weather/contact/schedule 실데이터
+
 # BIN을 절대경로로 정규화 (아래에서 WORK로 cd하므로 상대경로가 깨지지 않게)
 case "$BIN" in
     /*) ;;
@@ -76,7 +81,10 @@ check "A exit code 0"                  test "$rc_a" -eq 0
 RAW=raw_b.txt
 : > "$RAW"
 mkfifo in.fifo out.fifo
-"$BIN" < in.fifo > out.fifo 2>&1 &
+# TUK_NOTICE_FIXTURE: notice가 네트워크 대신 고정 HTML을 파싱(T09 결정론)
+# TUK_CAMPUS_DATA: bus/bob/map/weather/contact/schedule가 리포 data/campus를 읽도록
+TUK_NOTICE_FIXTURE="$FIXTURE_NOTICE" TUK_CAMPUS_DATA="$DATA_CAMPUS" \
+    "$BIN" < in.fifo > out.fifo 2>&1 &
 SHELL_PID=$!
 exec 3> in.fifo 4< out.fifo
 
@@ -128,9 +136,11 @@ send "bob -x"
 send "map -find B101"
 send "map -find"
 send "map -B"
+send "map -f"
+send "map -s"
 send "weather -c"
 send "weather -q"
-send "contact -p Kim"
+send "contact -p 김민석"
 send "contact -p"
 send "contact -e"
 send "sleep 9 &"
@@ -158,22 +168,31 @@ check "T07 top -time row2 newer job"   sh -c "$(declare -f seg); seg TOP | grep 
 check "T07 top runs 3 sort modes"      sh -c "$(declare -f seg); test \"\$(seg TOP | grep -c 'START_TIME')\" -eq 3"
 check "T10 top w/o option usage"       sh -c "$(declare -f seg); seg TOP | grep -q 'usage: top -cpu | -mem | -time'"
 check "T10 invalid top option"         sh -c "$(declare -f seg); seg TOP | grep -q 'invalid top option'"
-check "T09 notice -a -n 3 parsed"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] notice: -a -n 3'"
+check "T09 notice header 학사 3건"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[학사\] 최근 3건'"
+check "T09 notice item1 title+date"     sh -c "$(declare -f seg); seg CAMPUS | grep -q '1\. 2026학년도 2학기 수강신청 안내  (2026.07.07)'"
+check "T09 notice item1 url"            sh -c "$(declare -f seg); seg CAMPUS | grep -q 'https://www.tukorea.ac.kr/bbs/tukorea/1303/151455/artclView.do'"
+check "T09 notice -n 3 limits list"     sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c '^ *[0-9]\+\. ')\" -eq 3"
+check "T09 notice HTML entity decoded"  sh -c "$(declare -f seg); seg CAMPUS | grep -q '성적 입력 안내 & 유의사항'"
 check "T09 notice two categories usage" sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: notice')\" -ge 2"
-check "B schedule mock output"         sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] schedule:'"
+check "B schedule real header"         sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[AI소프트웨어학과 시간표\]'"
+check "B schedule shows a course"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '자료구조'"
 check "B schedule extra arg usage"     sh -c "$(declare -f seg); seg CAMPUS | grep -q 'usage: schedule'"
-check "B bus -1 dispatched"            sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] bus: -1'"
+check "B bus -1 real route header"     sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[1캠퍼스 셔틀\]'"
+check "B bus -1 shows first stop"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '경유: 정문'"
 check "B bus w/o option usage"         sh -c "$(declare -f seg); seg CAMPUS | grep -q 'usage: bus -1 | -2'"
-check "B bob -E dispatched"            sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] bob: -E'"
+check "B bob -E real menu header"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[E동 레스토랑\]'"
+check "B bob -E per-restaurant link"   sh -c "$(declare -f seg); seg CAMPUS | grep -q 'E동 레스토랑 메뉴: https://ibook.tukorea.ac.kr/Viewer/menu01'"
 check "B bob invalid option usage"     sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: bob')\" -ge 1"
-check "B map -find B101 dispatched"    sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] map: -find B101'"
+check "B map -find B101 real"          sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[B101\] B동 1층'"
 check "B map -find w/o value usage"    sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: map')\" -ge 1"
-check "B map -B dispatched"            sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] map: -B'"
-check "B weather -c dispatched"        sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] weather: -c'"
+check "B map -B real building"         sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[B동'"
+check "B map -f facility link"         sh -c "$(declare -f seg); seg CAMPUS | grep -q '편의시설 안내: .*dorm/2658'"
+check "B map -s sports link"           sh -c "$(declare -f seg); seg CAMPUS | grep -q '스포츠 플라자 안내: .*dorm/2659'"
+check "B weather -c real header"       sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[현재 날씨\]'"
 check "B weather invalid usage"        sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: weather')\" -ge 1"
-check "B contact -p Kim dispatched"    sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] contact: -p Kim'"
+check "B contact -p 김민석 real"        sh -c "$(declare -f seg); seg CAMPUS | grep -q '김민석 · AI소프트웨어학과'"
 check "B contact -p w/o value usage"   sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: contact')\" -ge 1"
-check "B contact -e dispatched"        sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[mock\] contact: -e'"
+check "B contact -e real header"       sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[긴급 연락처\]'"
 check "B exit code 0"                  test "$rc_b" -eq 0
 
 # ---------------- Session B2: 백그라운드 종료 감지/[done] (T03 후속) ----------------

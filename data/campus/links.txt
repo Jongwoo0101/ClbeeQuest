@@ -1,0 +1,15 @@
+# links.txt - 자주 바뀌는 캠퍼스 정보 페이지 공식 링크 (원본 메모: 리포 루트 식당.txt)
+# 페이지 내용(메뉴/편의시설/스포츠플라자 운영 등)은 수시로 갱신되므로 로컬에
+# 저장하지 않고 공식 링크만 안내한다. URL이 바뀌면 이 파일의 url만 고치면 된다.
+# format: key|label|url
+#
+# 식당별 최신 메뉴 링크 (bob -t/-E/-d): key = meal + 옵션.
+#  - TIP(-t), E동(-E)은 전자책(ibook) 메뉴 뷰어 링크.
+#  - 대신식당(-d)은 링크 미확보 → 항목 없음 → bob -d는 메뉴만 출력.
+meal-t|TIP 지하 식당|https://ibook.tukorea.ac.kr/viewer/menu02
+meal-E|E동 레스토랑|https://ibook.tukorea.ac.kr/Viewer/menu01
+# meal-d|대신식당|<링크 확보 시 여기에>
+#
+# map 보조 링크
+facility|편의시설|https://www.tukorea.ac.kr/dorm/2658/subview.do
+sports|스포츠 플라자|https://www.tukorea.ac.kr/dorm/2659/subview.do

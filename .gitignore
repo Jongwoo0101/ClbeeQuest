@@ -5,3 +5,6 @@
 .agents/skills 
 .agents/AGENTS.md
 
+# PowerShell 파트 빌드 산출물 (make가 생성; 커밋 금지)
+src/powershell/tuk_shell
+src/powershell/build/

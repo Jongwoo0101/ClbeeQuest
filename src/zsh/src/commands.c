@@ -88,10 +88,10 @@ int handle_help(int argc, char **argv)
     }
 
     printf("\n");
-    printf(TU_MINT " 📖 [TUK-OS 커맨드 매뉴얼]\n" COLOR_RESET);
+    printf(TU_MINT "[TUK-OS 커맨드 매뉴얼]\n" COLOR_RESET);
     printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
     
-    printf(TU_BLUE " 📌 시스템 기본 명령어\n" COLOR_RESET);
+    printf(TU_BLUE "[시스템 기본 명령어]\n" COLOR_RESET);
     printf("  cd [path]                 작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
     printf("  pwd                       현재 작업 디렉토리 출력\n");
     printf("  help                      이 도움말 출력\n");
@@ -107,7 +107,7 @@ int handle_help(int argc, char **argv)
     
     printf(TU_SKY_BLUE " ────────────────────────────────────────────────────────────────────────────\n" COLOR_RESET);
     
-    printf(TU_BLUE " 🎓 캠퍼스 특화 명령어\n" COLOR_RESET);
+    printf(TU_BLUE "[캠퍼스 특화 명령어]\n" COLOR_RESET);
     printf("  schedule                  AI소프트웨어학과 시간표 출력\n");
     printf("  bus -1 | -2               1캠퍼스 / 2캠퍼스 셔틀 시간표\n");
     printf("  bob -t | -e | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");

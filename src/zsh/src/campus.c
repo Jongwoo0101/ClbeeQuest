@@ -421,7 +421,7 @@ int handle_schedule_command(int argc, char **argv)
     }
 
     printf("\n");
-    printf(TU_MINT " 📅 [AI소프트웨어학과 시간표]\n" COLOR_RESET);
+    printf(TU_MINT "[AI소프트웨어학과 시간표]\n" COLOR_RESET);
     printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
     fputs(TU_BLUE, stdout);
     printf("  "); print_padded("요일", 6);
@@ -486,11 +486,11 @@ int handle_bus_command(int argc, char **argv)
         }
         found = 1;
         printf("\n");
-        printf(TU_SKY_BLUE " ▶▶ " TU_MINT "🚌 노선 정보 : %s\n" COLOR_RESET, f[1]);
+        printf(TU_SKY_BLUE " ▶▶ " TU_MINT "노선 정보 : %s\n" COLOR_RESET, f[1]);
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════\n" COLOR_RESET);
-        printf(TU_BLUE "  📍 경 유 지  : " COLOR_RESET); print_csv_as(f[2], " ➔  "); printf("\n");
-        printf(TU_BLUE "  ⏱️ 평일운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[3])); print_csv_as(f[3], "  "); printf("\n");
-        printf(TU_BLUE "  ⏱️ 주말운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[4])); print_csv_as(f[4], "  "); printf("\n");
+        printf(TU_BLUE "  경 유 지  : " COLOR_RESET); print_csv_as(f[2], " ➔  "); printf("\n");
+        printf(TU_BLUE "  평일운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[3])); print_csv_as(f[3], "  "); printf("\n");
+        printf(TU_BLUE "  주말운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[4])); print_csv_as(f[4], "  "); printf("\n");
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
         break; /* route_code는 유일 */
     }
@@ -915,9 +915,9 @@ int handle_contact_command(int argc, char **argv)
 
     if (strcmp(argv[1], "-p") == 0) {
         if (is_list_mode) {
-            printf(TU_MINT " 👨‍🏫 [교수 연락처 전체 목록]\n" COLOR_RESET);
+            printf(TU_MINT " [교수 연락처 전체 목록]\n" COLOR_RESET);
         } else {
-            printf(TU_MINT " 👨‍🏫 [교수 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+            printf(TU_MINT " [교수 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
         }
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
         fputs(TU_BLUE, stdout);
@@ -949,9 +949,9 @@ int handle_contact_command(int argc, char **argv)
         
     } else if (strcmp(argv[1], "-d") == 0) {
         if (is_list_mode) {
-            printf(TU_MINT " 🏢 [부서 연락처 전체 목록]\n" COLOR_RESET);
+            printf(TU_MINT "[부서 연락처 전체 목록]\n" COLOR_RESET);
         } else {
-            printf(TU_MINT " 🏢 [부서 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+            printf(TU_MINT "[부서 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
         }
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
         fputs(TU_BLUE, stdout);
@@ -978,7 +978,7 @@ int handle_contact_command(int argc, char **argv)
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
         
     } else { /* -e: 긴급 연락처 전체 */
-        printf(TU_MINT " 🚨 [긴급 연락처]\n" COLOR_RESET);
+        printf(TU_MINT "[긴급 연락처]\n" COLOR_RESET);
         printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
         fputs(TU_BLUE, stdout);
         printf("  "); print_padded("시설/기관명", 26);

@@ -1,0 +1,308 @@
+# BASH 파트 단계별 검증 결과 (이우진)
+
+> **기준 문서**: `docs/10_planning/plan.md` (개발 순서 1~7단계), `docs/40_verification/04_검증및추적명세서.md` (T01~T10)
+> **대상 커밋 기준일**: 2026-07-16
+> **빌드**: `make` (`gcc -std=c11 -Wall -Wextra -Werror -Iinclude`) — 경고 0, 링크 성공
+> **자동 회귀**: T01~T10 + 5단계 단위검증(U0~U6) 포함 70개 항목 전부 PASS (`tests/run_tests.sh`)
+> **메모리**: AddressSanitizer 실행 검증에서 use-after-free/overflow 없음
+
+본 문서는 plan.md의 1~7단계와 04번 명세서의 최소 테스트 시나리오(T01~T10)를,
+실제 TUK-Shell(BASH 빌드) 실행 출력으로 증빙한다. 아래 출력은 모두 실제
+실행 결과에서 ANSI 색상 코드만 제거해 옮긴 것이다.
+
+---
+
+## 1단계: 기본 REPL 루프 (fork/execvp 외부 명령)
+
+**검증 항목**: 프롬프트 반복 출력, 외부 명령 실행, 포그라운드 복귀, 없는 명령 오류 처리
+
+```text
+TUK-OS > pwd
+/private/tmp
+TUK-OS > echo hello TUK-Shell
+hello TUK-Shell
+TUK-OS > sle
+sle: No such file or directory
+TUK-OS > exit
+TUK-Shell을 종료합니다.
+```
+
+- `pwd`, `echo` → 외부 명령이 `fork()`+`execvp()`로 실행되고 포그라운드 대기 후 복귀
+- `sle`(오타) → 자식 `execvp` 실패 시 `perror(argv[0])` 출력 후 `exit(1)` (05 3-2)
+- **판정**: ✅ 통과 (T01 `pwd` 포함)
+
+---
+
+## 2단계: 구조체 + 연결 리스트 기반 백그라운드 작업 관리
+
+**검증 항목**: `&` 백그라운드 등록, `ProcessInfo` 리스트 적재, 종료 감지 시 `[done]` 회수 + 즉시 `free`
+
+```text
+TUK-OS > sleep 1 &
+[bg] pid=67043 command="sleep 1"
+TUK-OS > jobs
+[JOB#]  PID      STATUS    START_TIME  CPU%   MEM(KB)  COMMAND
+[1]     67043    RUNNING   18:47:45    4.3    2560     sleep 1
+TUK-OS > jobs
+[done] pid=67043 exit=0 command="sleep 1"
+No background jobs.
+```
+
+- `sleep 1 &` → `[bg]` 등록 메시지(TU SKY BLUE), PID·명령어·시작시각 저장
+- 1초 후 REPL 사이클 진입 시 `waitpid(WNOHANG)`로 종료 감지 → `[done]` 출력 후 리스트에서 노드 분리·`free`
+- **판정**: ✅ 통과 (T03 백그라운드 등록)
+
+---
+
+## 3단계: `jobs` 검색
+
+**검증 항목**: 전체 목록, `-pid` 완전일치, `-name` 부분일치, 미존재/오류 처리
+
+```text
+TUK-OS > jobs
+[JOB#]  PID      STATUS    START_TIME  CPU%   MEM(KB)  COMMAND
+[1]     66948    RUNNING   18:47:25    4.8    3072     sleep 30
+[2]     66950    RUNNING   18:47:25    5.0    4096     sleep 40
+TUK-OS > jobs -pid 999999
+No matching job found.
+TUK-OS > jobs -name sleep
+[JOB#]  PID      STATUS    START_TIME  CPU%   MEM(KB)  COMMAND
+[1]     66948    RUNNING   18:47:25    4.8    3072     sleep 30
+[2]     66950    RUNNING   18:47:25    5.0    4096     sleep 40
+```
+
+- `jobs` → 컬럼 제목 포함 표 출력 (01 6-4 규격)
+- `jobs -pid 999999` → 미존재 시 `No matching job found.`
+- `jobs -name sleep` → `name` 필드 부분 문자열 매칭
+- 추가 확인: `jobs -pid abc`(비숫자) 거부, `jobs -foo`(미정의) → `invalid jobs option`
+- **판정**: ✅ 통과 (T04 `jobs`, T05 `jobs -pid`, T06 `jobs -name`)
+
+---
+
+## 4단계: `top` 정렬 (qsort 콜백 직접 구현)
+
+**검증 항목**: `-cpu`/`-mem`/`-time` 각기 다른 기준 내림차순 정렬, 원본 리스트 불변, 오류 옵션 처리
+
+```text
+TUK-OS > top -cpu
+[1]     66950    RUNNING   18:47:25    5.0    4096     sleep 40
+[2]     66948    RUNNING   18:47:25    4.8    3072     sleep 30
+TUK-OS > top -mem
+[1]     66950    RUNNING   18:47:25    5.0    4096     sleep 40
+[2]     66948    RUNNING   18:47:25    4.8    3072     sleep 30
+TUK-OS > top -time
+[1]     66948    RUNNING   18:47:25    4.8    3072     sleep 30
+[2]     66950    RUNNING   18:47:25    5.0    4096     sleep 40
+TUK-OS > top -bad
+top: invalid top option '-bad'
+usage: top -cpu | -mem | -time
+```
+
+- `-cpu`/`-mem` → 값이 큰 job(pid 66950)이 `[1]`
+- `-time` → 먼저 등록된 job(pid 66948, 이른 `start_time`)이 `[1]` → 실행시간 기준 내림차순
+- 출력용 배열을 `qsort()`로 정렬하므로 원본 연결 리스트 순서는 보존
+- `top -bad` → `invalid top option`
+- **판정**: ✅ 통과 (T07 `top -time`)
+
+---
+
+## 5단계: `/proc` 연동 (실구현 — 동현 파서 기반 이식)
+
+**검증 항목**: 실행 중 프로세스의 CPU/메모리 값 갱신, 접근 실패가 쉘 종료로 이어지지 않음
+
+- `update_process_stats()`(`src/system_info.c`)가 **실제 `/proc`를 파싱**한다.
+  동현(PowerShell 파트)의 `/proc` 파서를 기반으로 BASH 파트에서 직접 이식했으며,
+  호출부(`refresh_all_processes`)와 헤더 시그니처(02 4-4)는 변경 없이 그대로다.
+  - `/proc/[pid]/stat`: comm에 공백/괄호가 있어도 안전하도록 마지막 `')'` 뒤에서
+    utime(14)·stime(15)·starttime(22)만 파싱 (proc(5))
+  - `/proc/[pid]/status`: `VmRSS:` 라인 → `MEM(KB)`. VmRSS 부재(좀비/커널 스레드)는
+    0KB로 성공 처리
+  - `CPU% = 100 × ((utime+stime)/CLK_TCK) / (uptime − starttime/CLK_TCK)`
+  - `/proc/[pid]` 소멸(프로세스 종료 직후의 정상 경합)은 perror 없이 조용히 `-1`
+    → 호출부가 `0.0`/`0` 복원(01 3-4), 생존 여부는 waitpid()가 우선 판정
+- **폴백 정책**: `TUK_PROC_ROOT` 지정 시 그 디렉터리만 사용하며 잘못된 경로면
+  폴백 없이 실패한다(`TUK_CAMPUS_DATA`와 동일한 "명시 시 폴백 없음" 정책).
+  미지정이면서 `/proc`가 없는 환경(macOS 등 비Linux 개발환경)에서는 기존 Mock과
+  동일한 결정적 더미 값을 반환해 회귀 결정론을 유지한다 — 위 3·4단계 표의
+  `CPU%`/`MEM(KB)`는 macOS 폴백 기준 값이며, Ubuntu/WSL에서는 실 파싱 값이 나온다.
+- **fixture 단위검증**: `tests/unit_system_info.c`가 `TUK_PROC_ROOT`로
+  `tests/fixtures/proc/`(uptime=1000s, utime=500·stime=300·starttime=20000,
+  `VmRSS: 5432 kB`, comm=`my (weird) proc`)를 주입해 비Linux 환경에서도 실제
+  파싱 경로를 증명한다. CLK_TCK=100 기준 기대값 `CPU 1.00% / MEM 5432KB`와
+  미존재 pid·NULL·pid≤0·잘못된 `TUK_PROC_ROOT`의 `-1` 반환까지 9개 항목(U0~U6)을
+  `run_tests.sh`가 집계한다.
+
+```text
+PASS: U0 unit_system_info compiles
+PASS: U1 fixture pid=4242 parsed (rc==0)
+PASS: U1 cpu_usage == 1.00% (stat utime/stime/starttime)
+PASS: U1 mem_usage_kb == 5432 (status VmRSS)
+PASS: U2 missing <pid> dir returns -1
+PASS: U3 NULL proc returns -1
+PASS: U4 pid<=0 returns -1
+PASS: U5 explicit bad TUK_PROC_ROOT returns -1 (no fallback)
+PASS: U6 unit_system_info exit code 0
+```
+
+- **판정**: ✅ 통과 (실구현 교체 + fixture 단위 회귀, 호출부 무변경)
+
+---
+
+## 6단계: 히스토리 파일 입출력 (`.tuk_history`)
+
+**검증 항목**: 명령 확정 시 원본 저장, 재시작 시 이력 로드 후 append, 빈 줄 미저장
+
+```text
+[1회차] pwd / jobs / schedule / exit 입력 후 .tuk_history:
+     1  pwd
+     2  jobs
+     3  schedule
+     4  exit
+
+[2회차] 재시작 후 help / exit 입력 → 기존 이력 보존 + append:
+     1  pwd
+     2  jobs
+     3  schedule
+     4  exit
+     5  help
+     6  exit
+```
+
+- 명령 확정 직후 append + `fflush` (03 7-1)
+- 재시작 시 기존 4줄 로드 후 새 2줄이 5~6번에 이어 붙음 → 로드/저장 정상
+- **판정**: ✅ 통과 (T08 재시작 후 히스토리 로드)
+
+---
+
+## 7단계: 캠퍼스 특화 명령어 (BASH 파서/디스패치 + 실데이터 핸들러)
+
+**검증 항목**: 진입점 식별, 옵션 검증, 잘못된 옵션 사용법 출력, 실데이터 출력
+
+```text
+TUK-OS > schedule
+[AI소프트웨어학과 시간표]
+ 월  1-2  09:00-10:50  자료구조 (김민석, E동 302)
+ 월  3-4  11:00-12:50  운영체제 (박서준, E동 305)
+ ... (10개 교시, 생략)
+TUK-OS > bus -1
+[1캠퍼스 셔틀]
+경유: 정문 → 거북섬역 → 1캠퍼스 본관 → 기숙사
+평일 44회: 07:30 07:50 08:10 ... (생략)
+주말 14회: 09:00 09:40 10:20 ... (생략)
+TUK-OS > bus
+usage: bus -1 | -2
+TUK-OS > notice -a -n 3
+[학사] 최근 3건
+  1. 2026학년도 2학기 수강신청 안내  (2026.07.07)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151455/artclView.do
+  2. 2026년도 국가장학금 2차 신청 안내  (2026.07.03)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151384/artclView.do
+  3. 여름 계절학기 성적 입력 안내 & 유의사항  (2026.06.30)
+     https://www.tukorea.ac.kr/bbs/tukorea/1303/151336/artclView.do
+TUK-OS > notice -a -g
+usage: notice [-g | -a | -s] [-n N]
+TUK-OS > map -find B101
+[B101] B동 1층 - 라운지 옆 소강의실
+TUK-OS > map -find
+usage: map -A | -B | -C | -D | -E | -F | -G | -f | -find ROOM
+TUK-OS > weather -c
+[현재 날씨] 거북섬/정왕동 · 2026-07-15
+맑음  최고 33.0℃ / 최저 26.0℃  미세먼지 좋음
+TUK-OS > contact -e
+[긴급 연락처]
+ 교내 보건실 · 031-8041-3001
+ 교내 경비실(24시간) · 031-8041-3002
+ ... (생략)
+```
+
+- `bus`(옵션 누락), `notice -a -g`(분류 옵션 2개), `map -find`(값 누락) → 각 명령어별 사용법 출력
+- **7개 캠퍼스 명령이 모두 실데이터로 구현됨** (plan.md 6단계 설계 의도: 로컬 파싱 후 출력, API 확장 위해 인터페이스 분리):
+  - `notice` → 학사공지 게시판 라이브 HTML(`src/notice.c`; `artclList.do?bbsOpenWrdSeq=` 학사482/장학484/일반487/전체미지정, 제목·등록일·URL 최신순, `-n N` 제한). 위 예시는 오프라인 고정 입력(`tests/fixtures/notice_sample.html`) 기준이며 실제 실행 시 최신 공지가 표시된다(2026-07 라이브 확인).
+  - `bus/bob/map/weather/contact/schedule` → 로컬 데이터 `data/campus`의 `.txt` 파싱(`src/campus_data.c`; 경로는 `TUK_CAMPUS_DATA` 우선, 미지정 시 `data/campus`→`../../data/campus`).
+  - **자주 바뀌는 정보는 링크 안내**(`data/campus/links.txt`): `bob -t/-E`는 식당별 최신 메뉴 링크(ibook 뷰어), `map -f`는 편의시설 링크, `map -s`(신설)는 스포츠 플라자 링크를 `🔗 …` 줄로 덧붙인다. 대신식당(`bob -d`)은 링크 미확보라 메뉴만 출력. 링크는 보조 출력이라 `links.txt`가 없어도 명령은 정상 동작.
+  - 데이터 로드 실패 시 오류 출력 후 `-1` 반환(9-4), 쉘은 계속 동작. 옵션 사용법 오류는 파서(`campus.c`)가 선처리.
+- **판정**: ✅ 통과 (T09 notice 실데이터 파싱·`-n` 제한·엔티티 디코드, B-단계 6개 명령 실데이터·식당별/편의/스포츠 링크·사용법 오류, T10 잘못된 옵션)
+
+---
+
+## 내장 예외처리 및 백그라운드 금지 (05 5-3)
+
+```text
+TUK-OS > cd a b
+usage: cd [path]
+TUK-OS > pwd extra
+usage: pwd
+TUK-OS > exit now
+usage: exit
+TUK-OS > cd &
+built-in command cannot run in background
+TUK-OS > jobs &
+built-in command cannot run in background
+```
+
+- 인자 과다 → 사용법 출력, 내장 명령 + `&` 조합 → 금지 메시지
+- **판정**: ✅ 통과 (T10 잘못된 옵션/조합)
+
+---
+
+## 크로스쉘 정합성 (02 7장)
+
+원종우 파트(ZSH) 출력과 TUK-Shell 내부 명령 형식을 대조한 결과 아래가 일치한다.
+
+| 항목 | 형식 |
+|------|------|
+| 프롬프트 | `TUK-OS > ` |
+| 백그라운드 등록 | `[bg] pid=N command="..."` |
+| 백그라운드 종료 | `[done] pid=N exit=N command="..."` |
+| 없는 명령 | `<cmd>: No such file or directory` |
+| 내장+`&` 금지 | `built-in command cannot run in background` |
+| 종료 알림 | `TUK-Shell을 종료합니다.` |
+
+> 종료 알림은 스펙에 명시되지 않았으나 ZSH 파트와의 정합성을 위해 추가했다.
+> `exit` 명령과 EOF(Ctrl+D) 양쪽 종료 경로에서 동일하게 출력된다.
+
+---
+
+## T01~T10 요약
+
+| ID | 시나리오 | 결과 |
+|----|----------|------|
+| T01 | `pwd` | ✅ |
+| T02 | `cd ..` 후 `pwd` | ✅ |
+| T03 | `sleep N &` 백그라운드 등록 | ✅ |
+| T04 | `jobs` 표 출력 | ✅ |
+| T05 | `jobs -pid <pid>` | ✅ |
+| T06 | `jobs -name sleep` | ✅ |
+| T07 | `top -time` 정렬 | ✅ |
+| T08 | 재시작 후 `.tuk_history` 로드 | ✅ |
+| T09 | `notice -a -n 3` 옵션 조합 파싱 | ✅ |
+| T10 | 잘못된 옵션 → 사용법/오류 | ✅ |
+
+---
+
+## 재현 방법
+
+```bash
+cd src/bash
+make                       # 빌드
+./tests/stage_demo.sh      # 단계별 시연 출력 재생
+./tests/run_tests.sh ./tuk_shell /tmp/tuk_verify   # 자동 회귀(T01~T10, 61항목)
+```
+
+> `run_tests.sh`는 notice 검증 시 `TUK_NOTICE_FIXTURE`로 고정 HTML을, 나머지 캠퍼스
+> 명령은 `TUK_CAMPUS_DATA`로 리포 `data/campus`를 주입해 네트워크 없이 결정론적으로
+> 검증한다. 라이브 확인은 `notice -a -n 3`(`-s`/`-g`)나 `bus -1`, `weather -c` 등을
+> 직접 실행하면 된다.
+
+## 남은 Mock 연동 지점
+
+| 지점 | 파일 | 담당 |
+|------|------|------|
+| `/proc` CPU/메모리 파싱 | `src/system_info.c` `update_process_stats()` | 동현(PowerShell 파트) |
+
+> 캠퍼스 명령 7종은 모두 실데이터로 구현 완료(`src/notice.c` = 라이브 게시판,
+> `src/campus_data.c` = `data/campus` 로컬 데이터). 남은 Mock은 동현 파트의
+> `/proc` 통계뿐이다.
+
+헤더 시그니처와 반환 규약이 고정되어 있어, 실제 구현으로 교체 시
+BASH 호출부 수정 없이 링크된다.

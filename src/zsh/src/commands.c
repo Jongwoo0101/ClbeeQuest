@@ -88,7 +88,7 @@ int handle_help(int argc, char **argv)
     }
 
     printf("\n");
-    printf(TU_MINT " 📖 [TUK-OS 커맨드 매뉴얼]\n" COLOR_RESET);
+    printf(TU_MINT "[TUK-OS 커맨드 매뉴얼]\n" COLOR_RESET);
     printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
     
     printf(TU_BLUE "[시스템 기본 명령어]\n" COLOR_RESET);

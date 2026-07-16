@@ -341,7 +341,7 @@ static int validate_contact(int argc, char **argv)
 int dispatch_campus_command(int argc, char **argv)
 {
     static const char *bus_options[] = { "-1", "-2" };
-    static const char *bob_options[] = { "-t", "e", "-d" };
+    static const char *bob_options[] = { "-t", "-e", "-d" };
     static const char *weather_options[] = { "-c", "-w", "-d" };
 
     if (strcmp(argv[0], "schedule") == 0) {
@@ -360,7 +360,7 @@ int dispatch_campus_command(int argc, char **argv)
     }
 
     if (strcmp(argv[0], "bob") == 0) {
-        if (validate_single_option(argc, argv, bob_options, 3, "bob -t | -E | -d") != 0) {
+        if (validate_single_option(argc, argv, bob_options, 3, "bob -t | -e | -d") != 0) {
             return 1;
         }
         return handle_bob_command(argc, argv);

@@ -6,6 +6,8 @@
  * 관리는 parser, commands, process, history, campus, system_info로 분리.
  */
 #include <stdio.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "commands.h"
 #include "history.h"
@@ -61,6 +63,9 @@ int main(void)
 {
     /* 가상 OS 부팅 시퀀스 및 로고 출력 */
     print_welcome_screen();
+
+    /* 부팅 시 usleep 딜레이 동안 stdin에 성급하게 유입된 입력/이스케이프 찌꺼기 바이트 플러시 */
+    tcflush(0, TCIFLUSH);
 
     /* 03 2-1 초기화: 리스트 헤드는 process.c에서 NULL로 시작.
      * 히스토리 실패 시 내부에서 경고만 출력하고 기능을 비활성화한다. */

@@ -71,8 +71,6 @@ int update_process_stats(ProcessInfo *proc) {
 
             // 3번(state)부터 22번(starttime) 필드까지 차례대로 파싱
             // 필요한 utime(14), stime(15), starttime(22)만 변수에 담고 나머지는 무시(%* 처리)
-            // 3번(state)부터 22번(starttime) 필드까지 차례대로 파싱
-            // 필요한 utime(14), stime(15), starttime(22)만 변수에 담고 나머지는 무시
             sscanf(p,
                    "%*c "       // 3: state
                    "%*d "       // 4: ppid
@@ -81,21 +79,21 @@ int update_process_stats(ProcessInfo *proc) {
                    "%*d "       // 7: tty_nr
                    "%*d "       // 8: tpgid
                    "%*u "       // 9: flags
-                   "%*u "       // 10: minflt  (l 제거)
-                   "%*u "       // 11: cminflt (l 제거)
-                   "%*u "       // 12: majflt  (l 제거)
-                   "%*u "       // 13: cmajflt (l 제거)
-                   "%lu "       // 14: utime   (값을 실제로 받으므로 유지!)
-                   "%lu "       // 15: stime   (값을 실제로 받으므로 유지!)
-                   "%*d "       // 16: cutime  (l 제거)
-                   "%*d "       // 17: cstime  (l 제거)
-                   "%*d "       // 18: priority(l 제거)
-                   "%*d "       // 19: nice    (l 제거)
-                   "%*d "       // 20: num_threads (l 제거)
-                   "%*d "       // 21: itrealvalue (l 제거)
+                   "%*lu "      // 10: minflt
+                   "%*lu "      // 11: cminflt
+                   "%*lu "      // 12: majflt
+                   "%*lu "      // 13: cmajflt
+                   "%lu "       // 14: utime
+                   "%lu "       // 15: stime
+                   "%*ld "      // 16: cutime
+                   "%*ld "      // 17: cstime
+                   "%*ld "      // 18: priority
+                   "%*ld "      // 19: nice
+                   "%*ld "      // 20: num_threads
+                   "%*ld "      // 21: itrealvalue
                    "%llu",      // 22: starttime
                    &utime, &stime, &starttime);
-                   
+
             long clk_tck = sysconf(_SC_CLK_TCK);
             if (clk_tck > 0) {
                 // HZ(clk_tck) 단위의 시간을 초 단위로 변환

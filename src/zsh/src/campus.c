@@ -341,7 +341,7 @@ static int validate_contact(int argc, char **argv)
 int dispatch_campus_command(int argc, char **argv)
 {
     static const char *bus_options[] = { "-1", "-2" };
-    static const char *bob_options[] = { "-t", "-E", "-d" };
+    static const char *bob_options[] = { "-t", "e", "-d" };
     static const char *weather_options[] = { "-c", "-w", "-d" };
 
     if (strcmp(argv[0], "schedule") == 0) {
@@ -499,7 +499,7 @@ int handle_bus_command(int argc, char **argv)
 }
 
 /* ============================================================
- * bob -t | -E | -d: 학식 메뉴 (bob.txt) - 가장 최근 날짜의 메뉴 출력
+ * bob -t | -e | -d: 학식 메뉴 (bob.txt) - 가장 최근 날짜의 메뉴 출력
  * 스키마: date|weekday|restaurant_code|restaurant_name|price|menu(,)
  * ============================================================ */
 

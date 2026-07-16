@@ -87,7 +87,7 @@ int handle_help(int argc, char **argv)
         return 1;
     }
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [7단계]\n" COLOR_RESET);
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어\n" COLOR_RESET);
     printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
     printf("  pwd                 현재 작업 디렉토리 출력\n");
     printf("  help                이 도움말 출력\n");
@@ -101,10 +101,10 @@ int handle_help(int argc, char **argv)
     printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
     printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
     printf("\n");
-    printf(TU_BLUE "캠퍼스 특화 명령어 [7단계]\n" COLOR_RESET);
+    printf(TU_BLUE "캠퍼스 특화 명령어\n" COLOR_RESET);
     printf("  schedule                  AI소프트웨어학과 시간표 출력\n");
     printf("  bus -1 | -2               1캠퍼스 / 2캠퍼스 셔틀 시간표\n");
-    printf("  bob -t | -E | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");
+    printf("  bob -t | -e | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");
     printf("  notice [-g|-a|-s] [-n N]  공지사항 (일반/학사/장학, 최근 N개)\n");
     printf("  map -A ~ -G               건물별 층 안내\n");
     printf("  map -f                    교내 편의시설 안내\n");

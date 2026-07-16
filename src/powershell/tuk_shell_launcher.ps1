@@ -1,4 +1,5 @@
 # tuk_shell_launcher.ps1
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host "🚀 TUK-Shell Launcher를 초기화합니다..." -ForegroundColor Cyan
 

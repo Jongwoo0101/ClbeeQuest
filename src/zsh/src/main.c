@@ -4,19 +4,24 @@
 #include "parser.h"
 #include "executor.h"
 #include "process.h"
+#include "history.h"
 
 int main(void)
 {
     char line[MAX_INPUT_LENGTH];
-    char raw_line[MAX_INPUT_LENGTH];
+    char raw_line[MAX_INPUT_LENGTH];     /* 히스토리 저장용: '&' 포함 원본 그대로 */
+    char command_line[MAX_INPUT_LENGTH]; /* 실행/메시지용: '&' 제거본 (5단계와 동일) */
     char *argv[MAX_ARGS + 1];
     int argc;
     int background_flag;
     int should_exit;
     size_t len;
     ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
+    HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 5단계: /proc 연동 (실제 CPU/메모리 정보)\n" COLOR_RESET);
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 6단계: 히스토리 파일 입출력\n" COLOR_RESET);
+
+    history_init(&history); /* 03문서 2-1 [3]: .tuk_history 열기 및 기존 이력 로드 */
 
     while (1) {
         /* 백그라운드 상태 갱신: REPL 한 사이클 시작 직전 (03문서 5-1) */
@@ -42,18 +47,24 @@ int main(void)
             continue;
         }
 
-        /* [3]/[4] 개행 제거 */
+        /* [3]/[4] 개행 제거 후 원본 문자열 보관 (히스토리용, 이후 수정하지 않음) */
         if (len > 0 && line[len - 1] == '\n') {
             line[len - 1] = '\0';
         }
-
-        /* 원본 문자열 보관: parse_command가 line을 strtok으로 파괴하기 전에 복사
-           (01_상세기능명세서.md 4-2 순서 4, ProcessInfo->command에 사용) */
         strncpy(raw_line, line, sizeof(raw_line) - 1);
         raw_line[sizeof(raw_line) - 1] = '\0';
+        strncpy(command_line, line, sizeof(command_line) - 1);
+        command_line[sizeof(command_line) - 1] = '\0';
 
-        /* [5],[6] 토큰화 + '&' 검사 */
+        /* [5],[6] 토큰화 + '&' 검사 (line 버퍼는 여기서 파괴됨) */
         argc = parse_command(line, argv, &background_flag);
+
+        /* [7] 히스토리 동기화: 빈 줄이 아니면 파싱 성공 여부와 무관하게 원본 그대로 저장
+           (03문서 3-1 순서 7, 01문서 8-1) */
+        if (argc != 0) {
+            history_add(&history, raw_line);
+        }
+
         if (argc == 0) {
             continue; /* 빈 줄 */
         }
@@ -61,18 +72,19 @@ int main(void)
             continue; /* 파싱 오류: 메시지는 parse_command에서 이미 출력됨 */
         }
 
-        /* 03문서 4-4 메시지 포맷과 일치시키기 위해 raw_line에서 '&' 제거 */
-        strip_background_marker(raw_line, background_flag);
+        /* 03문서 4-4 메시지 포맷과 일치시키기 위해 command_line에서 '&' 제거 */
+        strip_background_marker(command_line, background_flag);
 
-        execute_command(argc, argv, background_flag, raw_line, &should_exit, &job_list);
+        execute_command(argc, argv, background_flag, command_line, &should_exit, &job_list);
 
         if (should_exit) {
             break;
         }
     }
 
-    /* 종료 파이프라인: 리스트 노드 -> (히스토리는 6단계 예정) -> 기타 버퍼 순 (03문서 9장) */
+    /* 종료 파이프라인: 리스트 노드 -> 히스토리 -> 기타 버퍼 순 (03문서 9장) */
     free_process_list(&job_list);
+    history_close(&history);
 
     printf(TU_BLUE "TUK-Shell을 종료합니다.\n" COLOR_RESET);
     return 0;

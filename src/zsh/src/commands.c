@@ -87,32 +87,40 @@ int handle_help(int argc, char **argv)
         return 1;
     }
 
-    printf(TU_BLUE "[TUK-Shell (ZSH Part) - 사용 가능한 명령어]\n" COLOR_RESET);
-    printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
-    printf("  pwd                 현재 작업 디렉토리 출력\n");
-    printf("  help                이 도움말 출력\n");
-    printf("  exit                쉘 종료\n");
-    printf("  jobs                전체 백그라운드 작업 목록 출력\n");
-    printf("  jobs -pid [PID]     PID로 작업 검색\n");
-    printf("  jobs -name [NAME]   이름(부분 문자열)으로 작업 검색\n");
-    printf("  top -cpu            CPU 사용량 내림차순 정렬 출력\n");
-    printf("  top -mem            메모리 사용량 내림차순 정렬 출력\n");
-    printf("  top -time           실행시간 내림차순 정렬 출력\n");
-    printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
-    printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
     printf("\n");
-    printf(TU_BLUE "[캠퍼스 특화 명령어]\n" COLOR_RESET);
+    printf(TU_MINT " 📖 [TUK-OS 커맨드 매뉴얼]\n" COLOR_RESET);
+    printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+    
+    printf(TU_BLUE " 📌 시스템 기본 명령어\n" COLOR_RESET);
+    printf("  cd [path]                 작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
+    printf("  pwd                       현재 작업 디렉토리 출력\n");
+    printf("  help                      이 도움말 출력\n");
+    printf("  exit                      쉘 종료\n");
+    printf("  jobs                      전체 백그라운드 작업 목록 출력\n");
+    printf("  jobs -pid [PID]           PID로 작업 검색\n");
+    printf("  jobs -name [NAME]         이름(부분 문자열)으로 작업 검색\n");
+    printf("  top -cpu                  CPU 사용량 내림차순 정렬 출력\n");
+    printf("  top -mem                  메모리 사용량 내림차순 정렬 출력\n");
+    printf("  top -time                 실행시간 내림차순 정렬 출력\n");
+    printf("  [cmd] [args]              외부 명령어 실행 (fork + execvp)\n");
+    printf("  [cmd] [args] &            백그라운드 실행 및 작업 등록\n");
+    
+    printf(TU_SKY_BLUE " ────────────────────────────────────────────────────────────────────────────\n" COLOR_RESET);
+    
+    printf(TU_BLUE " 🎓 캠퍼스 특화 명령어\n" COLOR_RESET);
     printf("  schedule                  AI소프트웨어학과 시간표 출력\n");
     printf("  bus -1 | -2               1캠퍼스 / 2캠퍼스 셔틀 시간표\n");
     printf("  bob -t | -e | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");
-    printf("  notice [-g|-a|-s] [-n N]  공지사항 (일반/학사/장학, 최근 N개)\n");
+    printf("  notice [-g|-a|-s] [-n N]  공지사항 (일반/학사/장학, 최근 N개 출력)\n");
     printf("  map -A ~ -G               건물별 층 안내\n");
     printf("  map -f                    교내 편의시설 안내\n");
-    printf("  map -find [강의실]        강의실 위치 검색\n");
-    printf("  weather -c | -w | -d      현재 날씨 / 주간 예보 / 미세먼지\n");
-    printf("  contact -p [이름]         교수 연락처 검색\n");
-    printf("  contact -d [부서명]       행정부서 연락처 검색\n");
+    printf("  map -find [강의실]        강의실 위치 검색 (예: map -find E동 402)\n");
+    printf("  weather -c | -w | -d      현재 날씨 / 주간 예보 / 미세먼지 확인\n");
+    printf("  contact -p [이름 | -l]    교수 연락처 검색 (-l: 전체 목록)\n");
+    printf("  contact -d [부서 | -l]    행정부서 연락처 검색 (-l: 전체 목록)\n");
     printf("  contact -e                긴급 연락처 모아보기\n");
+    
+    printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
 
     return 0;
 }

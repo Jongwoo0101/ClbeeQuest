@@ -323,10 +323,10 @@ static int validate_map(int argc, char **argv)
     return 1;
 }
 
-/* contact -p NAME | -d DEPT | -e: -p, -d는 값 필수 (02문서 3-3) */
+/* contact -p NAME|-l | -d DEPT|-l | -e */
 static int validate_contact(int argc, char **argv)
 {
-    static const char *usage = "contact -p [NAME] | -d [DEPT] | -e";
+    static const char *usage = "contact -p [NAME | -l] | -d [DEPT | -l] | -e";
 
     if (argc == 2 && strcmp(argv[1], "-e") == 0) {
         return 0;
@@ -885,7 +885,7 @@ int handle_weather_command(int argc, char **argv)
 }
 
 /* ============================================================
- * contact -p NAME | -d DEPT | -e: 연락처 검색 (contact.txt)
+ * contact -p NAME|-l | -d DEPT|-l | -e: 연락처 검색 (contact.txt)
  * 스키마: PROF|name|dept|office|phone|email
  *        DEPT|name|phone|location
  *        EMERG|name|phone
@@ -897,6 +897,7 @@ int handle_contact_command(int argc, char **argv)
     char line[CAMPUS_LINE_MAX];
     char *f[CAMPUS_MAX_FIELDS];
     int matched = 0;
+    int is_list_mode = 0;
 
     (void)argc;
 
@@ -905,61 +906,103 @@ int handle_contact_command(int argc, char **argv)
         return -1;
     }
 
-    if (strcmp(argv[1], "-p") == 0) {
-        printf(TU_MINT "[교수 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
-        while (read_data_line(fp, line, sizeof(line))) {
-            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
-                continue;
-            }
-            /* 01문서 6-2의 jobs -name과 동일하게 부분 문자열 검색 */
-            if (strcmp(f[0], "PROF") != 0 || strstr(f[1], argv[2]) == NULL) {
-                continue;
-            }
-            fputs(TU_MINT, stdout);
-            print_padded(f[1], 9);  /* 이름 */
-            print_padded(f[2], 19); /* 학과 */
-            print_padded(f[3], 10); /* 연구실 */
-            print_padded(f[4], 16); /* 전화 */
-            fputs(f[5], stdout);    /* 이메일 */
-            fputs(COLOR_RESET "\n", stdout);
-            matched = 1;
-        }
-    } else if (strcmp(argv[1], "-d") == 0) {
-        printf(TU_MINT "[부서 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
-        while (read_data_line(fp, line, sizeof(line))) {
-            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 4) {
-                continue;
-            }
-            if (strcmp(f[0], "DEPT") != 0 || strstr(f[1], argv[2]) == NULL) {
-                continue;
-            }
-            fputs(TU_MINT, stdout);
-            print_padded(f[1], 16); /* 부서명 */
-            print_padded(f[2], 16); /* 전화 */
-            fputs(f[3], stdout);    /* 위치 */
-            fputs(COLOR_RESET "\n", stdout);
-            matched = 1;
-        }
-    } else { /* -e: 긴급 연락처 전체 */
-        printf(TU_MINT "[긴급 연락처]\n" COLOR_RESET);
-        while (read_data_line(fp, line, sizeof(line))) {
-            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 3) {
-                continue;
-            }
-            if (strcmp(f[0], "EMERG") != 0) {
-                continue;
-            }
-            fputs(TU_MINT, stdout);
-            print_padded(f[1], 22); /* 이름 */
-            fputs(f[2], stdout);    /* 전화 */
-            fputs(COLOR_RESET "\n", stdout);
-            matched = 1;
-        }
+    /* argv[2]가 "-l" 이면 전체 목록 모드로 동작 */
+    if (argc == 3 && strcmp(argv[2], "-l") == 0) {
+        is_list_mode = 1;
     }
+
+    printf("\n");
+
+    if (strcmp(argv[1], "-p") == 0) {
+        if (is_list_mode) {
+            printf(TU_MINT " 👨‍🏫 [교수 연락처 전체 목록]\n" COLOR_RESET);
+        } else {
+            printf(TU_MINT " 👨‍🏫 [교수 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+        }
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+        fputs(TU_BLUE, stdout);
+        printf("  "); print_padded("이름", 10);
+        print_padded("소속학과", 22);
+        print_padded("연구실", 12);
+        print_padded("전화번호", 16);
+        fputs("이메일" COLOR_RESET "\n", stdout);
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+        
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) continue;
+            if (strcmp(f[0], "PROF") != 0) continue;
+            
+            /* 리스트 모드가 아닐 때만 검색어 매칭 확인 */
+            if (!is_list_mode && strstr(f[1], argv[2]) == NULL) continue;
+            
+            fputs(TU_MINT, stdout);
+            printf("  "); print_padded(f[1], 10); /* 이름 */
+            fputs(COLOR_RESET, stdout);
+            print_padded(f[2], 22);             /* 학과 */
+            print_padded(f[3], 12);             /* 연구실 */
+            print_padded(f[4], 16);             /* 전화 */
+            fputs(f[5], stdout);                /* 이메일 */
+            fputs("\n", stdout);
+            matched = 1;
+        }
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
+        
+    } else if (strcmp(argv[1], "-d") == 0) {
+        if (is_list_mode) {
+            printf(TU_MINT " 🏢 [부서 연락처 전체 목록]\n" COLOR_RESET);
+        } else {
+            printf(TU_MINT " 🏢 [부서 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+        }
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+        fputs(TU_BLUE, stdout);
+        printf("  "); print_padded("부서명", 20);
+        print_padded("전화번호", 18);
+        fputs("위치" COLOR_RESET "\n", stdout);
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 4) continue;
+            if (strcmp(f[0], "DEPT") != 0) continue;
+            
+            /* 리스트 모드가 아닐 때만 검색어 매칭 확인 */
+            if (!is_list_mode && strstr(f[1], argv[2]) == NULL) continue;
+            
+            fputs(TU_MINT, stdout);
+            printf("  "); print_padded(f[1], 20); /* 부서명 */
+            fputs(COLOR_RESET, stdout);
+            print_padded(f[2], 18);             /* 전화 */
+            fputs(f[3], stdout);                /* 위치 */
+            fputs("\n", stdout);
+            matched = 1;
+        }
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
+        
+    } else { /* -e: 긴급 연락처 전체 */
+        printf(TU_MINT " 🚨 [긴급 연락처]\n" COLOR_RESET);
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+        fputs(TU_BLUE, stdout);
+        printf("  "); print_padded("시설/기관명", 26);
+        fputs("전화번호" COLOR_RESET "\n", stdout);
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 3) continue;
+            if (strcmp(f[0], "EMERG") != 0) continue;
+            
+            fputs(TU_MINT, stdout);
+            printf("  "); print_padded(f[1], 26); /* 기관명 */
+            fputs(COLOR_RESET, stdout);
+            fputs(f[2], stdout);                /* 전화 */
+            fputs("\n", stdout);
+            matched = 1;
+        }
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
+    }
+    
     fclose(fp);
 
     if (!matched) {
-        printf("검색 결과가 없습니다.\n");
+        printf("검색 결과가 없습니다.\n\n");
     }
     return 0;
 }

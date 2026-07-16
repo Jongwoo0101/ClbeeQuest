@@ -1,0 +1,6 @@
+Name:	my (weird) proc
+State:	S (sleeping)
+Pid:	4242
+VmPeak:	   20480 kB
+VmRSS:	    5432 kB
+Threads:	1

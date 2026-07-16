@@ -1,0 +1,97 @@
+<!--
+  notice_sample.html - notice 파서 회귀용 고정 입력 (T09)
+
+  실제 학사공지 게시판(artclList.do)의 마크업 구조를 축약해 재현한다.
+  파서가 의존하는 요소만 유지: 게시글 앵커(href=.../artclView.do),
+  <div class="title"><strong>제목</strong>, <dl class="date">..<dd>날짜</dd>.
+  다음 요소로 파서의 강건성을 함께 검증한다.
+   - 맨 앞 페이징 링크(artclList.do?page=2): 비-게시글 href 건너뛰기
+   - 항목2의 상태 배지 <span>: </strong> 경계 처리
+   - 항목3 제목의 &amp;: 엔티티 디코드
+   - 항목4: -n 3 상한으로 잘려 출력에서 제외되는지
+  run_tests.sh가 TUK_NOTICE_FIXTURE로 이 파일을 지정해 오프라인 검증한다.
+-->
+<div class="board-list">
+  <div class="paging">
+    <a href="/bbs/tukorea/1303/artclList.do?page=2">다음 페이지</a>
+  </div>
+  <ul>
+    <li>
+      <div class="box">
+        <a href="/bbs/tukorea/1303/151455/artclView.do" onclick="jf_viewArtcl('tukorea','1303','151455')">
+          <div class="thumb"></div>
+          <div class="info">
+            <div class="title">
+              <strong>
+                2026학년도 2학기 수강신청 안내
+              </strong>
+            </div>
+            <div class="desc">
+              <dl class="writer"><dt>작성자</dt><dd>학사지원팀</dd></dl>
+              <dl class="count"><dt>조회수</dt><dd>441</dd></dl>
+              <dl class="date"><dt>등록일</dt><dd>2026.07.07</dd></dl>
+            </div>
+          </div>
+        </a>
+      </div>
+    </li>
+    <li>
+      <div class="box">
+        <a href="/bbs/tukorea/1303/151384/artclView.do" onclick="jf_viewArtcl('tukorea','1303','151384')">
+          <div class="thumb"></div>
+          <div class="info">
+            <div class="title">
+              <strong>
+                2026년도 국가장학금 2차 신청 안내
+              </strong>
+              <span class="ing btn-ing">대기</span>
+            </div>
+            <div class="desc">
+              <dl class="writer"><dt>작성자</dt><dd>학생지원팀</dd></dl>
+              <dl class="count"><dt>조회수</dt><dd>1024</dd></dl>
+              <dl class="date"><dt>등록일</dt><dd>2026.07.03</dd></dl>
+            </div>
+          </div>
+        </a>
+      </div>
+    </li>
+    <li>
+      <div class="box">
+        <a href="/bbs/tukorea/1303/151336/artclView.do" onclick="jf_viewArtcl('tukorea','1303','151336')">
+          <div class="thumb"></div>
+          <div class="info">
+            <div class="title">
+              <strong>
+                여름 계절학기 성적 입력 안내 &amp; 유의사항
+              </strong>
+            </div>
+            <div class="desc">
+              <dl class="writer"><dt>작성자</dt><dd>교무팀</dd></dl>
+              <dl class="count"><dt>조회수</dt><dd>777</dd></dl>
+              <dl class="date"><dt>등록일</dt><dd>2026.06.30</dd></dl>
+            </div>
+          </div>
+        </a>
+      </div>
+    </li>
+    <li>
+      <div class="box">
+        <a href="/bbs/tukorea/1303/151292/artclView.do" onclick="jf_viewArtcl('tukorea','1303','151292')">
+          <div class="thumb"></div>
+          <div class="info">
+            <div class="title">
+              <strong>
+                2026 하계 도서관 운영시간 변경
+              </strong>
+            </div>
+            <div class="desc">
+              <dl class="writer"><dt>작성자</dt><dd>학술정보원</dd></dl>
+              <dl class="count"><dt>조회수</dt><dd>312</dd></dl>
+              <dl class="date"><dt>등록일</dt><dd>2026.06.28</dd></dl>
+            </div>
+          </div>
+        </a>
+      </div>
+    </li>
+  </ul>
+</div>

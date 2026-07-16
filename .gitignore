@@ -5,9 +5,26 @@
 .agents/skills 
 .agents/AGENTS.md
 
+# PowerShell 파트 빌드 산출물 (make가 생성; 커밋 금지)
+src/powershell/tuk_shell
+src/powershell/build/
+
+# Bash 파트 빌드 산출물
 src/bash/tuk_shell
 src/bash/build/
+
+# Zsh 파트 빌드 산출물
+src/zsh/tuk_shell
+src/zsh/build/
+
+# 루트의 빌드된 바이너리
 /tuk_shell
+
+# 히스토리 파일 무시
+.tuk_history
 src/bash/.tuk_history
+src/powershell/.tuk_history
+src/zsh/.tuk_history
+
 .DS_Store
 **/ .DS_Store

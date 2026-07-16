@@ -24,10 +24,6 @@
 재밌게 즐기시길 바랍니다.
 
 
----
-
-### [English Version]
-
 Here it is, at long last. The TUK-OS source code is released for your use.
 You still need the real campus data in the `data/campus` directory to work with this code. If you don't actually have the original text files, you'll just have to fake it and make your own.
 

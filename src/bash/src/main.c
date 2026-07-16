@@ -5,7 +5,9 @@
  * 구조적 흐름만 제어하며 100줄을 초과하지 않는다. 실제 파싱/실행/자원
  * 관리는 parser, commands, process, history, campus, system_info로 분리.
  */
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -61,6 +63,23 @@ int shell_loop(void)
 
 int main(void)
 {
+    /* 데이터 파일 절대 경로 고정 (실행 직후 CWD 기준) 
+     * 사용자가 쉘 내부에서 cd 명령어로 이동하더라도 데이터 파일을 찾을 수 있도록 함 */
+    if (getenv("TUK_CAMPUS_DATA") == NULL) {
+        const char *bases[] = { "data/campus", "../data/campus", "../../data/campus", "../../../data/campus" };
+        char abs_path[PATH_MAX];
+        for (int i = 0; i < 4; i++) {
+            char probe[PATH_MAX];
+            snprintf(probe, sizeof(probe), "%s/bus.txt", bases[i]);
+            if (access(probe, R_OK) == 0) {
+                if (realpath(bases[i], abs_path) != NULL) {
+                    setenv("TUK_CAMPUS_DATA", abs_path, 1);
+                    break;
+                }
+            }
+        }
+    }
+
     /* 가상 OS 부팅 시퀀스 및 로고 출력 */
     print_welcome_screen();
 

@@ -16,7 +16,7 @@ int main(void)
     size_t len;
     ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 4단계: top 정렬 기능\n" COLOR_RESET);
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 5단계: /proc 연동 (실제 CPU/메모리 정보)\n" COLOR_RESET);
 
     while (1) {
         /* 백그라운드 상태 갱신: REPL 한 사이클 시작 직전 (03문서 5-1) */

@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #include "campus.h"
 #include "executor.h"
@@ -52,7 +51,7 @@ int handle_cd(int argc, char **argv)
         return 1;
     }
 
-    if (chdir(target) != 0) {
+    if (tuk_change_directory(target) != 0) {
         perror("cd"); /* 01 5-1: 실패 시 perror, 현재 디렉토리 유지 */
         return 1;
     }
@@ -68,7 +67,7 @@ int handle_pwd(int argc, char **argv)
     }
 
     char cwd[CWD_BUFFER_SIZE];
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+    if (tuk_get_current_directory(cwd, sizeof(cwd)) == NULL) {
         perror("pwd");
         return 1;
     }
@@ -103,7 +102,7 @@ int handle_help(int argc, char **argv)
     printf("    weather -c | -w | -d          Siheung campus weather\n");
     printf("    contact -p NAME | -d DEPT | -e  contacts\n");
     printf("  external:\n");
-    printf("    [cmd] [args...] [&]           run via fork/execvp\n");
+    printf("    [cmd] [args...] [&]           run via the host platform\n");
     return 0;
 }
 
@@ -184,7 +183,7 @@ int handle_jobs(int argc, char **argv)
         }
         /* 01 6-2: 숫자 PID 완전 일치 검색 */
         ProcessInfo *found =
-            find_process_by_pid(g_process_list, (pid_t)pid_value);
+            find_process_by_pid(g_process_list, (tuk_pid_t)pid_value);
         if (found == NULL) {
             printf("No matching job found.\n"); /* 01 6-2 */
             return 0;
@@ -362,7 +361,7 @@ int execute_command(int argc, char **argv, int background_flag)
         return dispatch_campus_command(argc, argv);
     }
 
-    /* 02 3-4: 외부 명령 - fork/execvp (백그라운드면 등록 후 즉시 복귀) */
+    /* 02 3-4: 외부 명령 - 호스트 플랫폼 실행기(백그라운드면 즉시 복귀) */
     return run_external_command(argv, background_flag,
                                 g_raw_line != NULL ? g_raw_line : argv[0]);
 }

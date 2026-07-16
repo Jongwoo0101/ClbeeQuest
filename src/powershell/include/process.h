@@ -1,9 +1,9 @@
 #ifndef TUK_PROCESS_H
 #define TUK_PROCESS_H
 
-#include <sys/types.h>
 #include <time.h>
 
+#include "platform.h"
 #include "tuk_shell.h" /* MAX_INPUT_LENGTH: 원본 명령 문자열 보관 용량 */
 
 /*
@@ -14,7 +14,7 @@
  *  - 02_인터페이스명세서 4-3, 4-4 (함수 시그니처 고정)
  *  - 03_파이프라인명세서 5장 (상태 갱신 파이프라인)
  *
- * 외부 명령 실행(fork/execvp)은 executor.h로 분리했다.
+ * 외부 명령 실행은 executor.h와 platform.h로 분리했다.
  */
 
 #define PROCESS_NAME_MAX 64
@@ -28,7 +28,8 @@ typedef enum {
 
 /* 01 3-1: ProcessInfo 구조체 필드 명세 */
 typedef struct ProcessInfo {
-    pid_t pid;                       /* 백그라운드 자식 프로세스 ID */
+    tuk_pid_t pid;                   /* 백그라운드 자식 프로세스 ID */
+    tuk_process_handle_t handle;     /* wait/stat용 OS 핸들 */
     char name[PROCESS_NAME_MAX];     /* 실행 파일명(argv[0]) */
     char command[MAX_INPUT_LENGTH];  /* 사용자가 입력한 원본 명령 문자열 */
     time_t start_time;               /* 부모 쉘이 작업 등록한 시각 */
@@ -43,13 +44,14 @@ typedef struct ProcessInfo {
 extern ProcessInfo *g_process_list;
 
 /* 02 4-3: 프로세스 리스트 관리 인터페이스 (시그니처 고정) */
-ProcessInfo *create_process_node(pid_t pid, char **argv,
+ProcessInfo *create_process_node(tuk_pid_t pid, tuk_process_handle_t handle,
+                                 char **argv,
                                  const char *raw_command);
 int append_process(ProcessInfo **head, ProcessInfo *node);
-int remove_process(ProcessInfo **head, pid_t pid);
-ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid);
+int remove_process(ProcessInfo **head, tuk_pid_t pid);
+ProcessInfo *find_process_by_pid(ProcessInfo *head, tuk_pid_t pid);
 
-/* 02 4-4: 시스템 정보 갱신 - waitpid(WNOHANG) 폴링 및 통계 갱신 */
+/* 02 4-4: 시스템 정보 갱신 - 플랫폼별 non-blocking 폴링 및 통계 갱신 */
 int refresh_all_processes(ProcessInfo **head);
 
 /* 03 9장: exit/EOF 시 남은 노드 전체 해제 */

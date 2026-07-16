@@ -3,6 +3,22 @@
 
 Write-Host "🚀 TUK-Shell Launcher를 초기화합니다..." -ForegroundColor Cyan
 
+# Native Windows build takes precedence. WSL remains available for older checkouts
+# that only contain the Linux binary.
+$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+$nativeBinary = Join-Path $scriptDirectory "tuk_shell.exe"
+if (Test-Path -LiteralPath $nativeBinary) {
+    Write-Host "[INFO] Native Windows 실행 파일을 시작합니다..." -ForegroundColor Green
+    Push-Location $scriptDirectory
+    try {
+        & $nativeBinary
+        exit $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 # [1] wsl.exe 설치 및 접근성 검증
 if (-not (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
     Write-Host "[ERROR] 시스템에서 wsl.exe를 찾을 수 없습니다. WSL이 설치되어 있는지 확인해 주세요." -ForegroundColor Red
@@ -10,7 +26,7 @@ if (-not (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
 }
 
 # [2] Windows 경로를 WSL 경로로 자동 변환 (예: C:\Users\Donghyun -> /mnt/c/Users/Donghyun)
-$winPath = (Get-Location).Path
+$winPath = $scriptDirectory
 $driveLetter = $winPath.Substring(0, 1).ToLower()
 # 드라이브 문자를 제외한 나머지 경로의 역슬래시를 슬래시로 치환
 $wslPath = "/mnt/$driveLetter" + $winPath.Substring(2).Replace('\', '/')

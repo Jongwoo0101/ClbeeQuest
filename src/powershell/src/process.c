@@ -13,8 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
-
 #include "system_info.h"
 #include "tuk_shell.h"
 
@@ -65,7 +63,8 @@ static void copy_normalized_command(char *dest, size_t dest_size,
     }
 }
 
-ProcessInfo *create_process_node(pid_t pid, char **argv,
+ProcessInfo *create_process_node(tuk_pid_t pid, tuk_process_handle_t handle,
+                                 char **argv,
                                  const char *raw_command)
 {
     /* free 시점: 종료 감지 시 refresh_all_processes() -> remove_process()에서
@@ -78,6 +77,7 @@ ProcessInfo *create_process_node(pid_t pid, char **argv,
     }
 
     node->pid = pid;
+    node->handle = handle;
     snprintf(node->name, sizeof(node->name), "%s",
              (argv != NULL && argv[0] != NULL) ? argv[0] : "");
     copy_normalized_command(node->command, sizeof(node->command), raw_command);
@@ -110,7 +110,7 @@ int append_process(ProcessInfo **head, ProcessInfo *node)
     return 0;
 }
 
-int remove_process(ProcessInfo **head, pid_t pid)
+int remove_process(ProcessInfo **head, tuk_pid_t pid)
 {
     if (head == NULL) {
         return -1;
@@ -124,6 +124,7 @@ int remove_process(ProcessInfo **head, pid_t pid)
             } else {
                 prev->next = cur->next;
             }
+            tuk_close_process_handle(cur->handle);
             /* free 시점: 리스트에서 분리 직후 즉시 해제 (01 3-3, 05 2-1) */
             free(cur);
             return 0;
@@ -134,7 +135,7 @@ int remove_process(ProcessInfo **head, pid_t pid)
     return -1;
 }
 
-ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid)
+ProcessInfo *find_process_by_pid(ProcessInfo *head, tuk_pid_t pid)
 {
     for (ProcessInfo *cur = head; cur != NULL; cur = cur->next) {
         if (cur->pid == pid) {
@@ -152,34 +153,30 @@ int refresh_all_processes(ProcessInfo **head)
     ProcessInfo *cur = *head;
     while (cur != NULL) {
         ProcessInfo *next = cur->next; /* 노드 제거 대비 다음 포인터 선보관 */
-        int status = 0;
-        pid_t result = waitpid(cur->pid, &status,
-                               WNOHANG | WUNTRACED | WCONTINUED);
-        if (result < 0) {
-            perror("waitpid"); /* 03 10장: 회수 실패 시 오류 출력 후 계속 */
-        } else if (result == 0) {
+        TukWaitState wait_state = TUK_WAIT_RUNNING;
+        int exit_code = -1;
+        if (tuk_wait_process(cur->pid, cur->handle, 1, &wait_state,
+                             &exit_code) != 0) {
+            perror("process wait"); /* 03 10장: 회수 실패 시 오류 출력 후 계속 */
+        } else if (wait_state == TUK_WAIT_RUNNING) {
             /* 01 3-2: 미종료 - 통계만 갱신. 실패 시 0.0/0, 상태는 유지 (01 3-4) */
             if (update_process_stats(cur) != 0) {
                 cur->cpu_usage = 0.0;
                 cur->mem_usage_kb = 0;
             }
-        } else {
-            if (WIFEXITED(status) || WIFSIGNALED(status)) {
-                /* 03 5-4: RUNNING -> DONE, 종료 메시지 출력 후 정리 */
-                cur->status = DONE;
-                cur->exit_code = WIFEXITED(status)
-                                     ? WEXITSTATUS(status)
-                                     : 128 + WTERMSIG(status);
-                printf(TUK_COLOR_SKY "[done] pid=%ld exit=%d command=\"%s\""
-                       TUK_COLOR_RESET "\n",
-                       (long)cur->pid, cur->exit_code, cur->command);
-                /* 05 2-1: 종료 감지 즉시 리스트 분리 + free */
-                remove_process(head, cur->pid);
-            } else if (WIFSTOPPED(status)) {
-                cur->status = STOPPED; /* 03 5-4: RUNNING -> STOPPED */
-            } else if (WIFCONTINUED(status)) {
-                cur->status = RUNNING; /* 03 5-4: STOPPED -> RUNNING */
-            }
+        } else if (wait_state == TUK_WAIT_EXITED) {
+            /* 03 5-4: RUNNING -> DONE, 종료 메시지 출력 후 정리 */
+            cur->status = DONE;
+            cur->exit_code = exit_code;
+            printf(TUK_COLOR_SKY "[done] pid=%ld exit=%d command=\"%s\""
+                   TUK_COLOR_RESET "\n",
+                   (long)cur->pid, cur->exit_code, cur->command);
+            /* 05 2-1: 종료 감지 즉시 리스트 분리 + free */
+            remove_process(head, cur->pid);
+        } else if (wait_state == TUK_WAIT_STOPPED) {
+            cur->status = STOPPED;
+        } else if (wait_state == TUK_WAIT_CONTINUED) {
+            cur->status = RUNNING;
         }
         cur = next;
     }
@@ -194,6 +191,7 @@ void free_all_processes(ProcessInfo **head)
     ProcessInfo *cur = *head;
     while (cur != NULL) {
         ProcessInfo *next = cur->next;
+        tuk_close_process_handle(cur->handle);
         /* free 시점: exit/EOF 종료 파이프라인에서 전체 해제 (03 9장, 05 2-1) */
         free(cur);
         cur = next;

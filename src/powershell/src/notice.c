@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "parser.h"    /* parse_positive_long */
+#include "platform.h"
 #include "tuk_shell.h" /* TUK_COLOR_MINT / TUK_COLOR_RESET */
 
 #define NOTICE_URL_BASE "https://www.tukorea.ac.kr"
@@ -317,18 +318,26 @@ static char *fetch_via_curl(int category_seq)
 {
     /* category_seq는 내부 상수(0/482/484/487)뿐이라 주입 위험이 없다. */
     char cmd[512];
+#ifdef _WIN32
+    const char *template_by_category =
+        "curl -s -L --max-time 8 -A \"TUK-Shell notice\" \"%s%s?bbsOpenWrdSeq=%d\"";
+    const char *template_all =
+        "curl -s -L --max-time 8 -A \"TUK-Shell notice\" \"%s%s\"";
+#else
+    const char *template_by_category =
+        "curl -s -L --max-time 8 -A 'TUK-Shell notice' '%s%s?bbsOpenWrdSeq=%d'";
+    const char *template_all =
+        "curl -s -L --max-time 8 -A 'TUK-Shell notice' '%s%s'";
+#endif
     if (category_seq > 0) {
-        snprintf(cmd, sizeof(cmd),
-                 "curl -s -L --max-time 8 -A 'TUK-Shell notice' "
-                 "'%s%s?bbsOpenWrdSeq=%d'",
-                 NOTICE_URL_BASE, NOTICE_BOARD_PATH, category_seq);
+        snprintf(cmd, sizeof(cmd), template_by_category, NOTICE_URL_BASE,
+                 NOTICE_BOARD_PATH, category_seq);
     } else {
-        snprintf(cmd, sizeof(cmd),
-                 "curl -s -L --max-time 8 -A 'TUK-Shell notice' '%s%s'",
-                 NOTICE_URL_BASE, NOTICE_BOARD_PATH);
+        snprintf(cmd, sizeof(cmd), template_all, NOTICE_URL_BASE,
+                 NOTICE_BOARD_PATH);
     }
 
-    FILE *pp = popen(cmd, "r");
+    FILE *pp = tuk_popen(cmd, "r");
     if (pp == NULL) {
         perror("popen"); /* 05 3-x: 시스템콜 반환값 검증 */
         return NULL;
@@ -348,7 +357,7 @@ static char *fetch_via_curl(int category_seq)
             if (grown == NULL) {
                 perror("realloc");
                 free(buf); /* free 시점: 확장 실패로 폐기 */
-                pclose(pp);
+                tuk_pclose(pp);
                 return NULL;
             }
             buf = grown;
@@ -357,7 +366,7 @@ static char *fetch_via_curl(int category_seq)
         memcpy(buf + len, chunk, n);
         len += n;
     }
-    int status = pclose(pp);
+    int status = tuk_pclose(pp);
     if (status != 0) {
         /* curl 미설치/네트워크 오류 등: 데이터 로드 실패로 처리 */
         free(buf); /* free 시점: 실패 응답 폐기 */

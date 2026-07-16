@@ -1,5 +1,5 @@
 /*
- * system_info.c - /proc 파싱 기반 CPU/메모리 통계 실구현 [우진]
+ * system_info.c - 플랫폼별 CPU/메모리 통계 실구현 [우진]
  *
  * 근거 문서:
  *  - 01_상세기능명세서 3-4 (실패 시 0.0/0 복원은 호출부 담당), 02 4-4 (시그니처 고정)
@@ -14,7 +14,7 @@
  *  - status의 "VmRSS:" 라인 스캔 → MEM(KB)
  *  - CPU% = 100 * ((utime+stime)/CLK_TCK) / (uptime - starttime/CLK_TCK)
  *
- * 경로 정책:
+ * Linux 경로 정책:
  *  - TUK_PROC_ROOT 지정 시 그 디렉터리를 /proc 대신 사용(fixture 단위검증용).
  *    명시 지정이 잘못됐으면 조용히 폴백하지 않고 실패 — campus_data.c의
  *    TUK_CAMPUS_DATA와 동일 정책.
@@ -27,13 +27,70 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#else
 #include <unistd.h>
+#endif
 
 int update_process_stats(ProcessInfo *proc)
 {
     if (proc == NULL || proc->pid <= 0) {
         return -1;
     }
+
+#ifdef _WIN32
+    if (proc->handle == NULL) {
+        return -1;
+    }
+
+    FILETIME created;
+    FILETIME exited;
+    FILETIME kernel;
+    FILETIME user;
+    if (!GetProcessTimes(proc->handle, &created, &exited, &kernel, &user)) {
+        return -1;
+    }
+
+    ULARGE_INTEGER created_ticks;
+    ULARGE_INTEGER kernel_ticks;
+    ULARGE_INTEGER user_ticks;
+    created_ticks.LowPart = created.dwLowDateTime;
+    created_ticks.HighPart = created.dwHighDateTime;
+    kernel_ticks.LowPart = kernel.dwLowDateTime;
+    kernel_ticks.HighPart = kernel.dwHighDateTime;
+    user_ticks.LowPart = user.dwLowDateTime;
+    user_ticks.HighPart = user.dwHighDateTime;
+
+    FILETIME now_filetime;
+    GetSystemTimeAsFileTime(&now_filetime);
+    ULARGE_INTEGER now_ticks;
+    now_ticks.LowPart = now_filetime.dwLowDateTime;
+    now_ticks.HighPart = now_filetime.dwHighDateTime;
+    if (now_ticks.QuadPart <= created_ticks.QuadPart) {
+        return -1;
+    }
+
+    ULONGLONG process_ticks = kernel_ticks.QuadPart + user_ticks.QuadPart;
+    ULONGLONG elapsed_ticks = now_ticks.QuadPart - created_ticks.QuadPart;
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+    DWORD cpu_count = system_info.dwNumberOfProcessors;
+    if (cpu_count == 0) {
+        cpu_count = 1;
+    }
+    proc->cpu_usage = 100.0 * (double)process_ticks /
+                      (double)elapsed_ticks / (double)cpu_count;
+
+    PROCESS_MEMORY_COUNTERS memory;
+    if (!GetProcessMemoryInfo(proc->handle, &memory, sizeof(memory))) {
+        return -1;
+    }
+    proc->mem_usage_kb = (long)(memory.WorkingSetSize / 1024);
+    return 0;
+#else
 
     const char *env = getenv("TUK_PROC_ROOT");
     int explicit_root = (env != NULL && env[0] != '\0');
@@ -141,4 +198,5 @@ int update_process_stats(ProcessInfo *proc)
             : 100.0 * ((double)(utime + stime) / (double)clk) / elapsed;
     proc->mem_usage_kb = rss_kb;
     return 0; /* 실패(-1) 시 0.0/0 복원 규약은 호출부 refresh_all_processes()에 구현됨 */
+#endif
 }

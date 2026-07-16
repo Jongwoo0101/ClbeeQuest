@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "parser.h"
+#include "platform.h"
 
 #define HISTORY_FILE ".tuk_history"
 #define HISTORY_INITIAL_CAPACITY 16
@@ -46,7 +47,7 @@ static void history_buffer_add(const char *line)
     }
 
     /* free 시점: history_close()에서 원소 단위로 해제 */
-    char *copy = strdup(line);
+    char *copy = tuk_strdup(line);
     if (copy == NULL) {
         perror("history");
         return;

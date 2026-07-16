@@ -21,9 +21,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h> /* access, R_OK */
 
 #include "tuk_shell.h" /* TUK_COLOR_MINT / TUK_COLOR_RESET */
+#include "platform.h"
 
 /* 파싱된 데이터 파일: 한 덩어리 버퍼 + 주석/빈 줄 제외한 라인 포인터 배열 */
 typedef struct {
@@ -55,7 +55,7 @@ static int find_data_file(const char *filename, char *out, size_t outsz)
 
     for (size_t i = 0; i < nb; i++) {
         int w = snprintf(out, outsz, "%s/%s", bases[i], filename);
-        if (w > 0 && (size_t)w < outsz && access(out, R_OK) == 0) {
+        if (w > 0 && (size_t)w < outsz && tuk_file_readable(out)) {
             return 0;
         }
     }

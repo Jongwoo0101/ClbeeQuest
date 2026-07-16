@@ -18,8 +18,8 @@
  *  - TUK_PROC_ROOT 지정 시 그 디렉터리를 /proc 대신 사용(fixture 단위검증용).
  *    명시 지정이 잘못됐으면 조용히 폴백하지 않고 실패 — campus_data.c의
  *    TUK_CAMPUS_DATA와 동일 정책.
- *  - 미지정 && /proc 부재(macOS 등 비Linux 개발환경)면 기존 Mock과 동일한
- *    결정적 더미 값을 반환해 개발/회귀의 결정론을 유지한다(05 5-1).
+ *  - 미지정 && /proc 부재(macOS 등 비Linux 개발환경)면 실제 통계를
+ *    알 수 없으므로 0.0/0으로 표시한다.
  *    Ubuntu/WSL 등 Linux에서는 아래 실 파싱 경로가 동작한다.
  */
 #include "system_info.h"
@@ -52,11 +52,10 @@ int update_process_stats(ProcessInfo *proc)
         if (explicit_root) {
             return -1; /* 명시적 재정의 존중: 잘못된 경로면 폴백 없이 실패 */
         }
-        /* 비Linux 개발 폴백: /proc가 없는 macOS 등에서는 기존 Mock과 동일한
-         * PID 기반 결정적 더미 값을 유지해 정렬 검증(04 T07)과 회귀의
-         * 결정론을 보장한다(05 5-1). Linux에서는 이 분기에 오지 않는다. */
-        proc->cpu_usage = (double)(proc->pid % 100) / 10.0;
-        proc->mem_usage_kb = 1024L + (long)(proc->pid % 8) * 512L;
+        /* 비Linux 개발 폴백: /proc가 없는 macOS 등에서는 실제 CPU/RSS를
+         * Linux 방식으로 계산할 수 없으므로 알 수 없는 값은 0으로 둔다. */
+        proc->cpu_usage = 0.0;
+        proc->mem_usage_kb = 0;
         return 0;
     }
     double system_uptime = 0.0;

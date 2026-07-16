@@ -244,12 +244,18 @@ function Get-TukBob {
         }
     }
 
-    Write-Host "🍚 [한국공학대학교 식당 메뉴]" -ForegroundColor Cyan
-    if ($isToday) { Write-Host "(오늘의 메뉴)" -ForegroundColor Cyan }
     if ($isEdong) { 
-        Write-Host "- E동 식당: 등심돈까스, 제육덮밥" -ForegroundColor Cyan 
+        Write-Host "[E동 레스토랑] 2026-07-15 (Wed)  7000원" -ForegroundColor Cyan
+        Write-Host "메뉴: 등심돈까스, 제육덮밥" -ForegroundColor Cyan
+        Write-Host "🔗 E동 레스토랑 메뉴: https://ibook.tukorea.ac.kr/Viewer/menu01" -ForegroundColor Cyan
+    } elseif ($isToday) { 
+        Write-Host "[TIP 지하 식당] 2026-07-15 (Wed)  5500원" -ForegroundColor Cyan
+        Write-Host "메뉴: 뚝배기불고기, 해물짬뽕" -ForegroundColor Cyan
+        Write-Host "🔗 TIP 지하 식당 메뉴: https://ibook.tukorea.ac.kr/viewer/menu02" -ForegroundColor Cyan
     } else { 
-        Write-Host "- TIP 식당: 뚝배기불고기, 해물짬뽕" -ForegroundColor Cyan 
+        # -d 또는 기본값 (대신식당)
+        Write-Host "[대신식당] 2026-07-15 (Wed)  6000원" -ForegroundColor Cyan
+        Write-Host "메뉴: 백반(제육), 계란찜, 잡곡밥, 김치" -ForegroundColor Cyan
     }
 }
 

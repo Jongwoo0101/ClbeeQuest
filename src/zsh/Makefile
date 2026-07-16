@@ -6,7 +6,7 @@ TARGET = tuk_shell
 
 SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/parser.c $(SRC_DIR)/commands.c $(SRC_DIR)/executor.c \
        $(SRC_DIR)/process.c $(SRC_DIR)/system_info.c $(SRC_DIR)/history.c \
-       $(SRC_DIR)/campus.c
+       $(SRC_DIR)/campus.c $(SRC_DIR)/welcome.c
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 all: $(TARGET)

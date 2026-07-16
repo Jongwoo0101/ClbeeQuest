@@ -420,30 +420,37 @@ int handle_schedule_command(int argc, char **argv)
         return -1;
     }
 
-    printf(TU_MINT "[AI소프트웨어학과 시간표]\n" COLOR_RESET);
-    fputs(TU_MINT, stdout);
-    print_padded("요일", 6);
+    printf("\n");
+    printf(TU_MINT " 📅 [AI소프트웨어학과 시간표]\n" COLOR_RESET);
+    printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
+    fputs(TU_BLUE, stdout);
+    printf("  "); print_padded("요일", 6);
     print_padded("교시", 6);
-    print_padded("시간", 14);
-    print_padded("과목", 18);
-    print_padded("교수", 8);
+    print_padded("시간", 16);
+    print_padded("과목", 24);
+    print_padded("교수", 10);
     fputs("강의실" COLOR_RESET "\n", stdout);
+    printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n" COLOR_RESET);
 
     while (read_data_line(fp, line, sizeof(line))) {
         if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
-            continue; /* 스키마 불일치 줄은 건너뜀 */
+            continue; /* 스키마 불일치 줄은 건너음 */
         }
         fputs(TU_MINT, stdout);
-        print_padded(f[0], 6);  /* 요일 */
+        printf("  "); print_padded(f[0], 6);  /* 요일 */
         print_padded(f[1], 6);  /* 교시 */
-        print_padded(f[2], 14); /* 시간 */
-        print_padded(f[3], 18); /* 과목 */
-        print_padded(f[4], 8);  /* 교수 */
+        fputs(COLOR_RESET, stdout);
+        print_padded(f[2], 16); /* 시간 */
+        fputs(TU_MINT, stdout);
+        print_padded(f[3], 24); /* 과목 */
+        fputs(COLOR_RESET, stdout);
+        print_padded(f[4], 10); /* 교수 */
         fputs(f[5], stdout);    /* 강의실 */
-        fputs(COLOR_RESET "\n", stdout);
+        fputs("\n", stdout);
         printed = 1;
     }
     fclose(fp);
+    printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
 
     if (!printed) {
         printf("등록된 시간표가 없습니다.\n");
@@ -478,16 +485,13 @@ int handle_bus_command(int argc, char **argv)
             continue;
         }
         found = 1;
-        printf(TU_MINT "[%s]\n" COLOR_RESET, f[1]);
-        printf(TU_MINT "경유: " COLOR_RESET);
-        print_csv_as(f[2], " -> ");
         printf("\n");
-        printf(TU_MINT "평일 %d회: " COLOR_RESET, count_csv_items(f[3]));
-        print_csv_as(f[3], " ");
-        printf("\n");
-        printf(TU_MINT "주말 %d회: " COLOR_RESET, count_csv_items(f[4]));
-        print_csv_as(f[4], " ");
-        printf("\n");
+        printf(TU_SKY_BLUE " ▶▶ " TU_MINT "🚌 노선 정보 : %s\n" COLOR_RESET, f[1]);
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════\n" COLOR_RESET);
+        printf(TU_BLUE "  📍 경 유 지  : " COLOR_RESET); print_csv_as(f[2], " ➔  "); printf("\n");
+        printf(TU_BLUE "  ⏱️ 평일운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[3])); print_csv_as(f[3], "  "); printf("\n");
+        printf(TU_BLUE "  ⏱️ 주말운행  : " TU_MINT "[%d회] " COLOR_RESET, count_csv_items(f[4])); print_csv_as(f[4], "  "); printf("\n");
+        printf(TU_SKY_BLUE " ════════════════════════════════════════════════════════════\n\n" COLOR_RESET);
         break; /* route_code는 유일 */
     }
     fclose(fp);
@@ -497,7 +501,6 @@ int handle_bus_command(int argc, char **argv)
     }
     return 0;
 }
-
 /* ============================================================
  * bob -t | -e | -d: 학식 메뉴 (bob.txt) - 가장 최근 날짜의 메뉴 출력
  * 스키마: date|weekday|restaurant_code|restaurant_name|price|menu(,)

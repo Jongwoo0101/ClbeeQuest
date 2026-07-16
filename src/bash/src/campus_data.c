@@ -44,13 +44,15 @@ static void end_mint(void) { fputs(TUK_COLOR_RESET, stdout); }
 static int find_data_file(const char *filename, char *out, size_t outsz)
 {
     const char *env = getenv("TUK_CAMPUS_DATA");
-    const char *bases[2];
+    const char *bases[4];
     size_t nb = 0;
     if (env != NULL && env[0] != '\0') {
         bases[nb++] = env; /* 명시적 지정: 이 경로만 시도 */
     } else {
         bases[nb++] = "data/campus";
+        bases[nb++] = "../data/campus";
         bases[nb++] = "../../data/campus";
+        bases[nb++] = "../../../data/campus";
     }
 
     for (size_t i = 0; i < nb; i++) {

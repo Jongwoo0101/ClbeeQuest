@@ -1,9 +1,9 @@
 # BASH 파트 단계별 검증 결과 (이우진)
 
 > **기준 문서**: `docs/10_planning/plan.md` (개발 순서 1~7단계), `docs/40_verification/04_검증및추적명세서.md` (T01~T10)
-> **대상 커밋 기준일**: 2026-07-15
+> **대상 커밋 기준일**: 2026-07-16
 > **빌드**: `make` (`gcc -std=c11 -Wall -Wextra -Werror -Iinclude`) — 경고 0, 링크 성공
-> **자동 회귀**: T01~T10 포함 52개 항목 전부 PASS (`tests/run_tests.sh`)
+> **자동 회귀**: T01~T10 + 5단계 단위검증(U0~U6) 포함 70개 항목 전부 PASS (`tests/run_tests.sh`)
 > **메모리**: AddressSanitizer 실행 검증에서 use-after-free/overflow 없음
 
 본 문서는 plan.md의 1~7단계와 04번 명세서의 최소 테스트 시나리오(T01~T10)를,
@@ -106,15 +106,45 @@ usage: top -cpu | -mem | -time
 
 ---
 
-## 5단계: `/proc` 연동 (동현 파트 인터페이스, 현재 Mock)
+## 5단계: `/proc` 연동 (실구현 — 동현 파서 기반 이식)
 
 **검증 항목**: 실행 중 프로세스의 CPU/메모리 값 갱신, 접근 실패가 쉘 종료로 이어지지 않음
 
-- 위 3·4단계 표의 `CPU%`, `MEM(KB)` 값은 `update_process_stats()`가 채운 결과다.
-- 현재 이 함수는 `system_info.c`의 **Mock**(동현 파트 병합 전 결정적 더미 값)이며,
-  BASH 호출부(`refresh_all_processes`)는 실패 시 `0.0`/`0`으로 되돌리고 상태는 유지하는
-  규약(01 3-4)까지 구현되어 있어, 실제 `/proc` 파서로 교체해도 호출부 변경이 불필요하다.
-- **판정**: ✅ 인터페이스/호출부 통과, 실데이터 파싱은 동현 파트 병합 대기
+- `update_process_stats()`(`src/system_info.c`)가 **실제 `/proc`를 파싱**한다.
+  동현(PowerShell 파트)의 `/proc` 파서를 기반으로 BASH 파트에서 직접 이식했으며,
+  호출부(`refresh_all_processes`)와 헤더 시그니처(02 4-4)는 변경 없이 그대로다.
+  - `/proc/[pid]/stat`: comm에 공백/괄호가 있어도 안전하도록 마지막 `')'` 뒤에서
+    utime(14)·stime(15)·starttime(22)만 파싱 (proc(5))
+  - `/proc/[pid]/status`: `VmRSS:` 라인 → `MEM(KB)`. VmRSS 부재(좀비/커널 스레드)는
+    0KB로 성공 처리
+  - `CPU% = 100 × ((utime+stime)/CLK_TCK) / (uptime − starttime/CLK_TCK)`
+  - `/proc/[pid]` 소멸(프로세스 종료 직후의 정상 경합)은 perror 없이 조용히 `-1`
+    → 호출부가 `0.0`/`0` 복원(01 3-4), 생존 여부는 waitpid()가 우선 판정
+- **폴백 정책**: `TUK_PROC_ROOT` 지정 시 그 디렉터리만 사용하며 잘못된 경로면
+  폴백 없이 실패한다(`TUK_CAMPUS_DATA`와 동일한 "명시 시 폴백 없음" 정책).
+  미지정이면서 `/proc`가 없는 환경(macOS 등 비Linux 개발환경)에서는 기존 Mock과
+  동일한 결정적 더미 값을 반환해 회귀 결정론을 유지한다 — 위 3·4단계 표의
+  `CPU%`/`MEM(KB)`는 macOS 폴백 기준 값이며, Ubuntu/WSL에서는 실 파싱 값이 나온다.
+- **fixture 단위검증**: `tests/unit_system_info.c`가 `TUK_PROC_ROOT`로
+  `tests/fixtures/proc/`(uptime=1000s, utime=500·stime=300·starttime=20000,
+  `VmRSS: 5432 kB`, comm=`my (weird) proc`)를 주입해 비Linux 환경에서도 실제
+  파싱 경로를 증명한다. CLK_TCK=100 기준 기대값 `CPU 1.00% / MEM 5432KB`와
+  미존재 pid·NULL·pid≤0·잘못된 `TUK_PROC_ROOT`의 `-1` 반환까지 9개 항목(U0~U6)을
+  `run_tests.sh`가 집계한다.
+
+```text
+PASS: U0 unit_system_info compiles
+PASS: U1 fixture pid=4242 parsed (rc==0)
+PASS: U1 cpu_usage == 1.00% (stat utime/stime/starttime)
+PASS: U1 mem_usage_kb == 5432 (status VmRSS)
+PASS: U2 missing <pid> dir returns -1
+PASS: U3 NULL proc returns -1
+PASS: U4 pid<=0 returns -1
+PASS: U5 explicit bad TUK_PROC_ROOT returns -1 (no fallback)
+PASS: U6 unit_system_info exit code 0
+```
+
+- **판정**: ✅ 통과 (실구현 교체 + fixture 단위 회귀, 호출부 무변경)
 
 ---
 

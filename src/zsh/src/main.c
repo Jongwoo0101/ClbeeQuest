@@ -27,12 +27,26 @@ int main(void)
     if (getenv("TUK_CAMPUS_DATA") == NULL) {
         const char *bases[] = { "data/campus", "../data/campus", "../../data/campus", "../../../data/campus" };
         char abs_path[PATH_MAX];
-        for (int i = 0; i < 4; i++) {
-            char probe[PATH_MAX];
-            snprintf(probe, sizeof(probe), "%s/bus.txt", bases[i]);
-            if (access(probe, R_OK) == 0) {
-                if (realpath(bases[i], abs_path) != NULL) {
-                    setenv("TUK_CAMPUS_DATA", abs_path, 1);
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            for (int i = 0; i < 4; i++) {
+                char probe[PATH_MAX];
+                int path_length;
+                snprintf(probe, sizeof(probe), "%s/bus.txt", bases[i]);
+                if (access(probe, R_OK) == 0) {
+                    path_length = snprintf(abs_path, sizeof(abs_path), "%s/%s",
+                                           cwd, bases[i]);
+                    if (path_length > 0 &&
+                        (size_t)path_length < sizeof(abs_path) &&
+                        setenv("TUK_CAMPUS_DATA", abs_path, 1) == 0) {
+                        break;
+                    }
+                    if (path_length <= 0 ||
+                        (size_t)path_length >= sizeof(abs_path)) {
+                        fprintf(stderr, "campus: data path is too long\n");
+                    } else {
+                        perror("setenv");
+                    }
                     break;
                 }
             }
@@ -68,9 +82,13 @@ int main(void)
             continue;
         }
 
-        /* [3]/[4] 개행 제거 후 원본 문자열 보관 (히스토리용, 이후 수정하지 않음) */
+        /* [3]/[4] 개행 제거 후 원본 문자열 보관 (히스토리용, 이후 수정하지 않음).
+         * Windows PowerShell/WSL 파이프 입력은 CRLF일 수 있으므로 '\r'도 함께 제거한다. */
         if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
+            line[--len] = '\0';
+        }
+        if (len > 0 && line[len - 1] == '\r') {
+            line[--len] = '\0';
         }
         strncpy(raw_line, line, sizeof(raw_line) - 1);
         raw_line[sizeof(raw_line) - 1] = '\0';

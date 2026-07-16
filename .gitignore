@@ -20,3 +20,8 @@ src/zsh/build/
 # 루트의 빌드된 바이너리
 /tuk_shell
 
+# 히스토리 파일 무시
+.tuk_history
+src/bash/.tuk_history
+src/powershell/.tuk_history
+src/zsh/.tuk_history

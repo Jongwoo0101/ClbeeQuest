@@ -1,4 +1,4 @@
-﻿# tuk_test.ps1
+# tuk_test.ps1
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -234,10 +234,10 @@ function Get-TukBob {
         for ($i = 0; $i -lt $ArgsList.Count; $i++) {
             switch ($ArgsList[$i]) {
                 "-t" { $isToday = $true }
-                "-E" { $isEdong = $true }
+                "-e" { $isEdong = $true }
                 default {
                     Write-Host "invalid bob option: $($ArgsList[$i])" -ForegroundColor Red
-                    Write-Host "usage: bob [-t] [-E]" -ForegroundColor Yellow
+                    Write-Host "usage: bob [-t] [-e]" -ForegroundColor Yellow
                     return
                 }
             }

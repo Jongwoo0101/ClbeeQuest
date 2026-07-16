@@ -5,6 +5,7 @@
 #include "executor.h"
 #include "process.h"
 #include "history.h"
+#include "welcome.h"
 
 int main(void)
 {
@@ -19,18 +20,8 @@ int main(void)
     ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
     HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
 
-    /* 한국공학대학교 로고 및 환영 메시지 출력 */
-    printf(TU_BLUE);
-    printf("           /\\           \n");
-    printf("        /\\/  \\/\\        \n");
-    printf("       / / \\/ \\ \\       \n");
-    printf("       \\ \\ /\\ / /       \n");
-    printf("        \\/\\  /\\/        \n");
-    printf("           \\/           \n");
-    printf("\n");
-    printf("   WELCOME TO TUK OS    \n");
-    printf("========================\n");
-    printf(COLOR_RESET);
+    /* 가상 OS 부팅 시퀀스 및 로고 출력 */
+    print_welcome_screen();
 
     history_init(&history); /* 03문서 2-1 [3]: .tuk_history 열기 및 기존 이력 로드 */
 
@@ -70,8 +61,7 @@ int main(void)
         /* [5],[6] 토큰화 + '&' 검사 (line 버퍼는 여기서 파괴됨) */
         argc = parse_command(line, argv, &background_flag);
 
-        /* [7] 히스토리 동기화: 빈 줄이 아니면 파싱 성공 여부와 무관하게 원본 그대로 저장
-           (03문서 3-1 순서 7, 01문서 8-1) */
+        /* [7] 히스토리 동기화: 빈 줄이 아니면 파싱 성공 여부와 무관하게 원본 그대로 저장 */
         if (argc != 0) {
             history_add(&history, raw_line);
         }

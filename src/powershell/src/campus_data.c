@@ -333,7 +333,7 @@ int handle_bus_command(int argc, char **argv)
 int handle_bob_command(int argc, char **argv)
 {
     (void)argc;
-    const char *code = argv[1]; /* -t | -E | -d */
+    const char *code = argv[1]; /* -t | -e | -d */
     DataFile df;
     if (data_open("bob.txt", &df) != 0) {
         return -1;

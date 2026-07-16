@@ -97,7 +97,7 @@ int handle_help(int argc, char **argv)
     printf("  campus:\n");
     printf("    schedule                      AI-SW department timetable\n");
     printf("    bus -1 | -2                   campus shuttle timetable\n");
-    printf("    bob -t | -E | -d              cafeteria menu\n");
+    printf("    bob -t | -e | -d              cafeteria menu\n");
     printf("    notice [-g | -a | -s] [-n N]  school notices\n");
     printf("    map -A..-G | -f | -find ROOM  campus buildings\n");
     printf("    weather -c | -w | -d          Siheung campus weather\n");

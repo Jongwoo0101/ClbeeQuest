@@ -22,7 +22,7 @@ cd "$WORK" || exit 1
 # 쉘 getcwd() 출력과 프롬프트 검증 문자열이 일치하도록)
 WORK="$(pwd -P)"
 rm -f .tuk_history transcript_a.txt transcript_b.txt transcript_b2.txt transcript_c.txt raw_b.txt
-rm -f in.fifo out.fifo
+rm -f in.fifo out.fifo unit_si unit_si_out.txt
 
 PASS=0
 FAIL=0
@@ -131,7 +131,7 @@ send "schedule"
 send "schedule extra"
 send "bus -1"
 send "bus"
-send "bob -E"
+send "bob -e"
 send "bob -x"
 send "map -find B101"
 send "map -find"
@@ -180,8 +180,8 @@ check "B schedule extra arg usage"     sh -c "$(declare -f seg); seg CAMPUS | gr
 check "B bus -1 real route header"     sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[1캠퍼스 셔틀\]'"
 check "B bus -1 shows first stop"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '경유: 정문'"
 check "B bus w/o option usage"         sh -c "$(declare -f seg); seg CAMPUS | grep -q 'usage: bus -1 | -2'"
-check "B bob -E real menu header"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[E동 레스토랑\]'"
-check "B bob -E per-restaurant link"   sh -c "$(declare -f seg); seg CAMPUS | grep -q 'E동 레스토랑 메뉴: https://ibook.tukorea.ac.kr/Viewer/menu01'"
+check "B bob -e real menu header"      sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[E동 레스토랑\]'"
+check "B bob -e per-restaurant link"   sh -c "$(declare -f seg); seg CAMPUS | grep -q 'E동 레스토랑 메뉴: https://ibook.tukorea.ac.kr/Viewer/menu01'"
 check "B bob invalid option usage"     sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: bob')\" -ge 1"
 check "B map -find B101 real"          sh -c "$(declare -f seg); seg CAMPUS | grep -q '\[B101\] B동 1층'"
 check "B map -find w/o value usage"    sh -c "$(declare -f seg); test \"\$(seg CAMPUS | grep -c 'usage: map')\" -ge 1"
@@ -218,6 +218,29 @@ lines_after=$(wc -l < .tuk_history)
 
 check "T08 restart appends (load ok)"  test "$lines_after" -eq $((lines_before + 2))
 check "T08 old entries preserved"      grep -qx 'sleep 7 &' .tuk_history
+
+# ---------------- Unit: update_process_stats /proc 파싱 (plan.md 5단계) ----------------
+# TUK_PROC_ROOT로 fixtures/proc를 주입해 비Linux 환경에서도 실제 파싱 경로를
+# 결정론적으로 검증한다. 컴파일 플래그는 Makefile CFLAGS와 동일.
+UNIT_SI="$WORK/unit_si"
+check "U0 unit_system_info compiles" \
+    gcc -std=c11 -Wall -Wextra -I"$SCRIPT_DIR/../include" \
+        "$SCRIPT_DIR/unit_system_info.c" "$SCRIPT_DIR/../src/system_info.c" \
+        -o "$UNIT_SI"
+if [ -x "$UNIT_SI" ]; then
+    "$UNIT_SI" "$SCRIPT_DIR/fixtures/proc" > unit_si_out.txt 2>&1
+    unit_rc=$?
+    # 단위 테스트가 출력한 PASS:/FAIL: 라인을 전체 집계에 합산
+    while IFS= read -r uline; do
+        case "$uline" in
+        PASS:*) printf '%s\n' "$uline"; PASS=$((PASS + 1)) ;;
+        FAIL:*) printf '%s\n' "$uline"; FAIL=$((FAIL + 1)) ;;
+        esac
+    done < unit_si_out.txt
+    check "U6 unit_system_info exit code 0" test "$unit_rc" -eq 0
+else
+    check "U6 unit_system_info exit code 0" false
+fi
 
 rm -f in.fifo out.fifo
 

@@ -7,7 +7,7 @@
 #include "process.h"
 #include "tuk_shell.h"
 
-/* 4단계 기준 내장 명령어 목록. */
+/* 4단계 기준 내장 명령어 목록. 캠퍼스 명령어(7단계)는 campus.c에서 별도 관리한다. */
 static const char *BUILTIN_NAMES[] = { "cd", "pwd", "help", "exit", "jobs", "top" };
 static const int BUILTIN_COUNT = 6;
 
@@ -87,7 +87,7 @@ int handle_help(int argc, char **argv)
         return 1;
     }
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [4단계]\n" COLOR_RESET);
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [7단계]\n" COLOR_RESET);
     printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
     printf("  pwd                 현재 작업 디렉토리 출력\n");
     printf("  help                이 도움말 출력\n");
@@ -100,9 +100,19 @@ int handle_help(int argc, char **argv)
     printf("  top -time           실행시간 내림차순 정렬 출력\n");
     printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
     printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
-    printf("\n"
-           "※ schedule, bus, bob, notice, map, weather, contact 명령어는\n"
-           "  plan.md 개발 순서에 따라 이후 단계에서 순차적으로 추가됩니다.\n");
+    printf("\n");
+    printf(TU_BLUE "캠퍼스 특화 명령어 [7단계]\n" COLOR_RESET);
+    printf("  schedule                  AI소프트웨어학과 시간표 출력\n");
+    printf("  bus -1 | -2               1캠퍼스 / 2캠퍼스 셔틀 시간표\n");
+    printf("  bob -t | -E | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");
+    printf("  notice [-g|-a|-s] [-n N]  공지사항 (일반/학사/장학, 최근 N개)\n");
+    printf("  map -A ~ -G               건물별 층 안내\n");
+    printf("  map -f                    교내 편의시설 안내\n");
+    printf("  map -find [강의실]        강의실 위치 검색\n");
+    printf("  weather -c | -w | -d      현재 날씨 / 주간 예보 / 미세먼지\n");
+    printf("  contact -p [이름]         교수 연락처 검색\n");
+    printf("  contact -d [부서명]       행정부서 연락처 검색\n");
+    printf("  contact -e                긴급 연락처 모아보기\n");
 
     return 0;
 }

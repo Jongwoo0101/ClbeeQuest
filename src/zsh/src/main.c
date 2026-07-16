@@ -19,7 +19,18 @@ int main(void)
     ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
     HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 6단계: 히스토리 파일 입출력\n" COLOR_RESET);
+    /* 한국공학대학교 로고 및 환영 메시지 출력 */
+    printf(TU_BLUE);
+    printf("           /\\           \n");
+    printf("        /\\/  \\/\\        \n");
+    printf("       / / \\/ \\ \\       \n");
+    printf("       \\ \\ /\\ / /       \n");
+    printf("        \\/\\  /\\/        \n");
+    printf("           \\/           \n");
+    printf("\n");
+    printf("   WELCOME TO TUK OS    \n");
+    printf("========================\n");
+    printf(COLOR_RESET);
 
     history_init(&history); /* 03문서 2-1 [3]: .tuk_history 열기 및 기존 이력 로드 */
 

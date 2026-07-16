@@ -1,0 +1,2581 @@
+#ifndef COMMANDS_H
+#define COMMANDS_H
+
+#include "process.h"
+
+/* 개별 핸들러: 성공 0, 사용법 오류 1 (02_인터페이스명세서.md 4-2) */
+int handle_cd(int argc, char **argv);
+int handle_pwd(int argc, char **argv);
+int handle_help(int argc, char **argv);
+int handle_exit(int argc, char **argv);
+
+/*
+ * handle_jobs
+ *  - jobs / jobs -pid [PID] / jobs -name [KEYWORD] 처리 (01_상세기능명세서.md 6장).
+ *  - job_list: 백그라운드 작업 리스트의 헤드 포인터 주소. 호출 시 먼저
+ *    refresh_all_processes()로 상태를 갱신한 뒤 조회한다 (03_파이프라인명세서.md 6-1).
+ *  - 반환값: 0 정상(검색 결과 없음도 정상 0), 1 사용법/옵션 오류
+ */
+int handle_jobs(int argc, char **argv, ProcessInfo **job_list);
+
+/*
+ * handle_top
+ *  - top -cpu / top -mem / top -time 처리 (01_상세기능명세서.md 7장).
+ *  - 원본 연결 리스트는 훼손하지 않고, 출력용 배열로 복사한 뒤 qsort()로 정렬한다
+ *    (01문서 7-3, 03_파이프라인명세서.md 6-2).
+ *  - 반환값: 0 정상(활성 작업 0개도 정상), 1 사용법/옵션 오류, -1 치명적 오류(malloc 실패)
+ */
+int handle_top(int argc, char **argv, ProcessInfo **job_list);
+
+/*
+ * is_builtin
+ *  - cmd가 내장 명령어 이름이면 1, 아니면 0.
+ *  - 현재 cd/pwd/help/exit/jobs/top 인식 (4단계 기준).
+ */
+int is_builtin(const char *cmd);
+
+/*
+ * execute_builtin
+ *  - argv[0]에 해당하는 내장 명령어 핸들러를 호출한다. 호출 전 is_builtin() 확인 전제.
+ *  - should_exit : exit 명령이 정상 처리되면 1로 설정 (main 루프 종료 신호).
+ *  - job_list    : jobs 명령이 리스트 조회를 위해 필요로 함.
+ *  - 반환값: 0 정상, 1 사용법 오류, -1 치명적 오류
+ */
+int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_list);
+
+#endif /* COMMANDS_H */
+
+#ifndef EXECUTOR_H
+#define EXECUTOR_H
+
+#include "process.h"
+
+/*
+ * execute_command
+ *  - parse_command로 얻은 argc/argv/background_flag를 받아
+ *    내장/외부 명령을 분기 실행한다 (03_파이프라인명세서.md 4-1).
+ *  - raw_command  : 사용자가 입력한 원본 명령 문자열(& 제거 전). 백그라운드 등록 시
+ *                   ProcessInfo->command 필드 채우는 용도로 사용된다.
+ *  - should_exit  : exit 명령이 실행되면 1로 설정.
+ *  - job_list     : 백그라운드 작업 연결 리스트의 헤드 포인터 주소. 백그라운드 실행 시
+ *                   create_process_node() + append_process()로 등록된다.
+ *
+ * 반환값: 0 정상, 1 사용법(또는 백그라운드 금지) 오류, -1 치명적 오류
+ */
+int execute_command(int argc, char **argv, int background_flag, const char *raw_command,
+                     int *should_exit, ProcessInfo **job_list);
+
+#endif /* EXECUTOR_H */
+
+#ifndef HISTORY_H
+#define HISTORY_H
+
+#include <stdio.h>
+
+#define HISTORY_FILE_NAME ".tuk_history"
+
+/*
+ * HistoryContext
+ *  - entries : malloc/realloc로 관리되는 문자열 포인터 배열 (세션 내 히스토리 메모리 버퍼)
+ *  - count   : 현재 저장된 항목 수
+ *  - capacity: entries 배열의 할당 크기
+ *  - fp      : .tuk_history 파일 스트림. 열기 실패 시 NULL.
+ *  - enabled : 파일 열기에 성공했을 때만 1. 실패하면 0 (히스토리 기능 전체 비활성화).
+ */
+typedef struct {
+    char **entries;
+    int count;
+    int capacity;
+    FILE *fp;
+    int enabled;
+} HistoryContext;
+
+/*
+ * history_init
+ *  - 현재 디렉토리의 .tuk_history 파일을 "a+" 모드로 연다(없으면 생성).
+ *  - 파일이 이미 존재하면 전체 내용을 한 줄씩 읽어 메모리 버퍼(ctx->entries)에 로드한다
+ *    (01문서 8-2, 03문서 7-2).
+ *  - 파일 열기 실패 시: perror("history") 출력 후 ctx->enabled=0으로 남기고 반환한다.
+ *    이 실패가 쉘 전체 종료로 이어지지 않는다 (01문서 8-3, 05문서 3-2).
+ */
+void history_init(HistoryContext *ctx);
+
+/*
+ * history_add
+ *  - line이 빈 문자열이면 아무 것도 하지 않는다 (01문서 8-1 "빈 줄은 저장하지 않는다").
+ *  - 히스토리가 비활성화 상태(ctx->enabled==0)면 아무 것도 하지 않는다.
+ *  - 파일에 append 후 fflush(), 그리고 메모리 버퍼에도 추가한다 (03문서 7-1).
+ *  - 파일 쓰기 실패: perror 출력 후에도 현재 명령 실행 자체는 계속 진행되어야 하므로
+ *    이 함수는 실패해도 쉘을 중단시키지 않는다 (03문서 7-3).
+ *  - 메모리 버퍼 확장(realloc) 실패 시에도 파일 저장은 이미 끝난 상태이므로 경고만 출력한다
+ *    (03문서 7-3 "메모리 버퍼 추가 실패: 파일 저장만 유지").
+ */
+void history_add(HistoryContext *ctx, const char *line);
+
+/*
+ * history_close
+ *  - 파일 스트림을 fflush 후 fclose (05_개발철칙명세서.md 2-2).
+ *  - 메모리 버퍼에 malloc된 모든 문자열과 배열 자체를 free (05문서 2-1).
+ */
+void history_close(HistoryContext *ctx);
+
+#endif /* HISTORY_H */
+
+#ifndef PARSER_H
+#define PARSER_H
+
+/*
+ * parse_command
+ *  - line : 원본 입력 문자열 (개행이 이미 제거된 상태). 내부에서 strtok으로
+ *           직접 토큰화하므로 line 버퍼가 변형된다.
+ *  - argv : 호출자가 크기 MAX_ARGS+1로 준비한 배열. 토큰 포인터(line 내부를 가리킴)로 채워지고
+ *           마지막에 argv[argc] = NULL 규약을 지킨다.
+ *  - background_flag : 출력 파라미터. 마지막 독립 토큰이 "&"이면 1, 아니면 0으로 설정.
+ *                       "&"가 background_flag에 반영된 뒤에는 argv에서 제거된다.
+ *
+ * 반환값 (01_상세기능명세서.md 4-2, 02_인터페이스명세서.md 4-1):
+ *    0 : 빈 입력(공백만 있는 줄 포함) - 실행하지 않고 다음 루프로
+ *   >0 : 정상 파싱된 토큰 개수(argc)
+ *   -1 : 파싱 오류 (예: MAX_ARGS 초과)
+ */
+int parse_command(char *line, char **argv, int *background_flag);
+
+/*
+ * strip_background_marker
+ *  - background_flag가 1일 때, raw_line 끝의 '&'와 그 앞 공백을 제거한다.
+ *  - 03_파이프라인명세서.md 4-4의 시작 메시지 포맷(command="sleep 30")이 '&'를
+ *    표시하지 않는 것과 ProcessInfo->command 저장 형식을 일치시키기 위한 용도.
+ *  - background_flag가 0이면 아무 동작도 하지 않는다.
+ */
+void strip_background_marker(char *raw_line, int background_flag);
+
+#endif /* PARSER_H */
+
+#ifndef PROCESS_H
+#define PROCESS_H
+
+#include <sys/types.h>
+#include <time.h>
+#include "tuk_shell.h"
+
+#define PROC_NAME_MAX 64
+#define PROC_COMMAND_MAX MAX_INPUT_LENGTH
+
+/* 01_상세기능명세서.md 3-2 상태값 규칙 */
+typedef enum {
+    PROC_RUNNING, /* 백그라운드 실행 중, waitpid(WNOHANG) 미종료 */
+    PROC_STOPPED, /* 시그널 등으로 일시 정지 */
+    PROC_DONE     /* 종료 확인, 정리 직전 */
+} ProcessStatus;
+
+/* 01_상세기능명세서.md 3-1 필드 명세 */
+typedef struct ProcessInfo {
+    pid_t pid;
+    char name[PROC_NAME_MAX];
+    char command[PROC_COMMAND_MAX];
+    time_t start_time;
+    double cpu_usage;
+    long mem_usage_kb;
+    ProcessStatus status;
+    int exit_code; /* 실행 중이면 -1 */
+    struct ProcessInfo *next;
+} ProcessInfo;
+
+/*
+ * create_process_node
+ *  - malloc(sizeof(ProcessInfo))로 노드 생성.
+ *  - 실패 시 NULL 반환하고 호출부는 리스트에 넣지 않는다 (01문서 3-3).
+ */
+ProcessInfo *create_process_node(pid_t pid, char **argv, const char *raw_command);
+
+/* 리스트 끝에 노드 추가. 성공 0, 실패 -1 */
+int append_process(ProcessInfo **head, ProcessInfo *node);
+
+/*
+ * remove_process
+ *  - pid에 해당하는 노드를 리스트에서 분리한 뒤 즉시 free() (01문서 3-3, 05문서 2-1).
+ *  - 성공 0, 대상 없음 -1.
+ */
+int remove_process(ProcessInfo **head, pid_t pid);
+
+/* pid로 노드 검색 (리스트 순회, 노드 소유권은 그대로 리스트에 있음) */
+ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid);
+
+/*
+ * refresh_all_processes
+ *  - 03_파이프라인명세서.md 5장 순서를 그대로 구현:
+ *    waitpid(WNOHANG) 종료 확인 -> 미종료면 update_process_stats() 갱신
+ *    -> 종료 확인되면 [done] 메시지 출력 후 노드 제거/free.
+ *  - 항상 0을 반환한다(리스트 자체가 없을 때만 -1).
+ */
+int refresh_all_processes(ProcessInfo **head);
+
+/* exit/EOF 시 남은 모든 노드를 순회하며 free (01문서 3-3, 05문서 2-1) */
+void free_process_list(ProcessInfo **head);
+
+/* 상태 enum -> 문자열 (이후 jobs/top 출력에서 재사용) */
+const char *process_status_to_string(ProcessStatus status);
+
+#endif /* PROCESS_H */
+
+#ifndef SYSTEM_INFO_H
+#define SYSTEM_INFO_H
+
+#include "process.h"
+
+/*
+ * update_process_stats
+ *  - /proc/[pid]/stat, /proc/[pid]/status 파싱 기반 CPU/메모리 갱신.
+ *  - 성공 시 0, 실패 시 -1.
+ *  - 실패 시 호출부(refresh_all_processes)는 cpu_usage=0.0, mem_usage_kb=0으로 처리하고
+ *    status는 기존 값을 유지한다.
+ *
+ * [5단계 구현 노트]
+ *  - mem_usage_kb: /proc/[pid]/status의 VmRSS 값을 그대로 사용한다.
+ *  - cpu_usage: /proc/[pid]/stat의 utime+stime(틱)을 sysconf(_SC_CLK_TCK)로 초 단위 변환한 뒤,
+ *    "프로세스 시작 이후 경과 시간(start_time 기준)" 대비 비율(%)로 계산한다.
+ *    즉 top(1)의 순간 CPU%(직전 샘플링 구간 델타)가 아니라 "시작 이후 누적 평균 CPU 점유율"이다.
+ *    순간 사용률을 계산하려면 이전 측정 시점의 utime+stime과 timestamp를 별도로 저장해야 하는데,
+ *    01_상세기능명세서.md 3-1의 ProcessInfo 필드 명세에는 그런 필드가 없어 구조체를 임의로
+ *    늘리지 않기 위해 누적 평균 방식으로 단순화했다(팀 합의 시 델타 방식으로 교체 가능).
+ */
+int update_process_stats(ProcessInfo *proc);
+
+#endif /* SYSTEM_INFO_H */
+
+#ifndef TUK_SHELL_H
+#define TUK_SHELL_H
+
+/* 입력/토큰 제약 (02_인터페이스명세서.md 2-1) */
+#define MAX_INPUT_LENGTH 1024
+#define MAX_ARGS 64
+
+/* TU Color (ANSI True Color) - 05_개발철칙명세서.md 4-1 */
+#define TU_BLUE      "\x1b[38;2;23;88;168m"   /* #1758A8 : 프롬프트/강조 */
+#define TU_SKY_BLUE  "\x1b[38;2;6;143;211m"   /* #068FD3 : 시스템/작업 메시지 */
+#define TU_MINT      "\x1b[38;2;1;179;205m"   /* #01B3CD : 캠퍼스 명령어 결과 (이후 단계) */
+#define COLOR_RESET  "\x1b[0m"
+
+#endif /* TUK_SHELL_H */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include "commands.h"
+#include "process.h"
+#include "tuk_shell.h"
+
+/* 4단계 기준 내장 명령어 목록. */
+static const char *BUILTIN_NAMES[] = { "cd", "pwd", "help", "exit", "jobs", "top" };
+static const int BUILTIN_COUNT = 6;
+
+int is_builtin(const char *cmd)
+{
+    int i;
+
+    if (cmd == NULL) {
+        return 0;
+    }
+    for (i = 0; i < BUILTIN_COUNT; i++) {
+        if (strcmp(cmd, BUILTIN_NAMES[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int handle_cd(int argc, char **argv)
+{
+    const char *target;
+
+    /* 인자 2개 이상 -> usage 출력 (01문서 5-2) */
+    if (argc >= 3) {
+        fprintf(stderr, "usage: cd [path]\n");
+        return 1;
+    }
+
+    if (argc == 1) {
+        /*
+         * 팀 합의 사항(01문서 5-2 "인자 0개" 항목): 인자 없을 때는 HOME으로 이동.
+         * 필요 시 이 부분을 미지원(오류 처리)으로 바꾸는 것도 가능하나,
+         * 일반 쉘 관례를 따라 HOME 이동을 기본값으로 채택.
+         */
+        target = getenv("HOME");
+        if (target == NULL) {
+            fprintf(stderr, "cd: HOME environment variable not set\n");
+            return 1;
+        }
+    } else {
+        target = argv[1];
+    }
+
+    if (chdir(target) != 0) {
+        perror("cd"); /* 05문서 3-1: 반환값 검증 + perror */
+        return 0;     /* 실패해도 쉘 종료 아님, 현재 디렉토리 유지 */
+    }
+
+    return 0;
+}
+
+int handle_pwd(int argc, char **argv)
+{
+    char cwd[MAX_INPUT_LENGTH];
+    (void)argv; /* 시그니처 통일을 위해 유지, 실제로는 사용하지 않음 */
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: pwd\n");
+        return 1;
+    }
+
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        perror("pwd");
+        return 0;
+    }
+
+    printf("%s\n", cwd);
+    return 0;
+}
+
+int handle_help(int argc, char **argv)
+{
+    (void)argv;
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: help\n");
+        return 1;
+    }
+
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [4단계]\n" COLOR_RESET);
+    printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
+    printf("  pwd                 현재 작업 디렉토리 출력\n");
+    printf("  help                이 도움말 출력\n");
+    printf("  exit                쉘 종료\n");
+    printf("  jobs                전체 백그라운드 작업 목록 출력\n");
+    printf("  jobs -pid [PID]     PID로 작업 검색\n");
+    printf("  jobs -name [NAME]   이름(부분 문자열)으로 작업 검색\n");
+    printf("  top -cpu            CPU 사용량 내림차순 정렬 출력\n");
+    printf("  top -mem            메모리 사용량 내림차순 정렬 출력\n");
+    printf("  top -time           실행시간 내림차순 정렬 출력\n");
+    printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
+    printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
+    printf("\n"
+           "※ schedule, bus, bob, notice, map, weather, contact 명령어는\n"
+           "  plan.md 개발 순서에 따라 이후 단계에서 순차적으로 추가됩니다.\n");
+
+    return 0;
+}
+
+int handle_exit(int argc, char **argv)
+{
+    (void)argv;
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: exit\n");
+        return 1;
+    }
+    /*
+     * 실제 자원 정리(백그라운드 리스트 free, 히스토리 flush/close 등)는
+     * main.c의 종료 파이프라인에서 수행한다. 여기서는 종료 신호 역할만 한다.
+     */
+    return 0;
+}
+
+/* jobs 출력 컬럼 헤더 (01문서 6-4, 02문서 1-2 "표 형식 출력은 컬럼 제목을 포함한다") */
+static void print_jobs_header(void)
+{
+    printf("%-6s %-8s %-9s %-10s %-6s %-9s %s\n",
+           "JOB#", "PID", "STATUS", "START_TIME", "CPU%", "MEM(KB)", "COMMAND");
+}
+
+/* 노드 한 건을 01문서 6-4 포맷에 맞춰 출력 */
+static void print_job_row(int job_number, const ProcessInfo *proc)
+{
+    char job_col[16];
+    char time_buf[16];
+    struct tm *tm_info;
+
+    snprintf(job_col, sizeof(job_col), "[%d]", job_number);
+
+    tm_info = localtime(&proc->start_time);
+    if (tm_info != NULL) {
+        strftime(time_buf, sizeof(time_buf), "%H:%M:%S", tm_info);
+    } else {
+        snprintf(time_buf, sizeof(time_buf), "--:--:--");
+    }
+
+    printf("%-6s %-8d %-9s %-10s %-6.1f %-9ld %s\n",
+           job_col, (int)proc->pid, process_status_to_string(proc->status),
+           time_buf, proc->cpu_usage, proc->mem_usage_kb, proc->command);
+}
+
+/* argv[2]가 순수 숫자(PID)인지 검사 - "jobs -pid abc" 방어 (01문서 6-3) */
+static int is_all_digits(const char *s)
+{
+    if (s == NULL || *s == '\0') {
+        return 0;
+    }
+    for (; *s != '\0'; s++) {
+        if (*s < '0' || *s > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* jobs (인자 없음): 전체 목록 출력 */
+static int handle_jobs_all(ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    int job_number;
+
+    if (head == NULL) {
+        printf("No background jobs.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        print_job_row(job_number, cur);
+    }
+    return 0;
+}
+
+/* jobs -pid [PID]: PID 완전 일치 검색 (01문서 6-2) */
+static int handle_jobs_by_pid(int argc, char **argv, ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *found = NULL;
+    int job_number;
+    int found_index = 0;
+    pid_t target_pid;
+
+    if (argc != 3) {
+        fprintf(stderr, "usage: jobs -pid [PID]\n");
+        return 1;
+    }
+    if (!is_all_digits(argv[2])) {
+        fprintf(stderr, "invalid jobs option: PID must be numeric\n");
+        return 1;
+    }
+    target_pid = (pid_t)atol(argv[2]);
+
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        if (cur->pid == target_pid) {
+            found = cur;
+            found_index = job_number;
+            break; /* PID는 유일하므로 첫 매칭에서 종료 */
+        }
+    }
+
+    if (found == NULL) {
+        printf("No matching job found.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    print_job_row(found_index, found);
+    return 0;
+}
+
+/* jobs -name [KEYWORD]: name 필드 부분 문자열 검색 (01문서 6-2) */
+static int handle_jobs_by_name(int argc, char **argv, ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    int job_number;
+    int matched = 0;
+
+    if (argc != 3) {
+        fprintf(stderr, "usage: jobs -name [KEYWORD]\n");
+        return 1;
+    }
+
+    for (cur = head; cur != NULL; cur = cur->next) {
+        if (strstr(cur->name, argv[2]) != NULL) {
+            matched = 1;
+            break;
+        }
+    }
+
+    if (!matched) {
+        printf("No matching job found.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        if (strstr(cur->name, argv[2]) != NULL) {
+            print_job_row(job_number, cur);
+        }
+    }
+    return 0;
+}
+
+int handle_jobs(int argc, char **argv, ProcessInfo **job_list)
+{
+    /* 03문서 6-1: jobs 호출 -> 백그라운드 상태 갱신을 먼저 수행 */
+    refresh_all_processes(job_list);
+
+    if (argc == 1) {
+        return handle_jobs_all(*job_list);
+    }
+
+    if (strcmp(argv[1], "-pid") == 0) {
+        return handle_jobs_by_pid(argc, argv, *job_list);
+    }
+
+    if (strcmp(argv[1], "-name") == 0) {
+        return handle_jobs_by_name(argc, argv, *job_list);
+    }
+
+    fprintf(stderr, "invalid jobs option\n");
+    return 1;
+}
+
+/*
+ * TopEntry
+ *  - 정렬 기준(-cpu/-mem/-time)에 따라 미리 계산해 둔 metric 값과 원본 노드
+ *    포인터를 함께 담는다. qsort 콜백은 이 metric만 비교하면 되므로
+ *    옵션별 분기를 컴페어 함수 밖에서 한 번만 처리할 수 있다.
+ */
+typedef struct {
+    ProcessInfo *proc;
+    double metric;
+} TopEntry;
+
+/* 내림차순 비교 콜백 (01문서 7-3 "비교 함수는 직접 구현") */
+static int compare_top_entry_desc(const void *a, const void *b)
+{
+    const TopEntry *ea = (const TopEntry *)a;
+    const TopEntry *eb = (const TopEntry *)b;
+
+    if (ea->metric < eb->metric) {
+        return 1;
+    }
+    if (ea->metric > eb->metric) {
+        return -1;
+    }
+    return 0;
+}
+
+int handle_top(int argc, char **argv, ProcessInfo **job_list)
+{
+    ProcessInfo *cur;
+    TopEntry *entries;
+    int count;
+    int i;
+    time_t now;
+
+    /* 03문서 6-2: top 호출 -> 백그라운드 상태 갱신 먼저 */
+    refresh_all_processes(job_list);
+
+    /* 옵션이 없거나 2개 이상이면 사용법 출력 (01문서 7-4) */
+    if (argc != 2) {
+        fprintf(stderr, "usage: top -cpu | top -mem | top -time\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "-cpu") != 0 &&
+        strcmp(argv[1], "-mem") != 0 &&
+        strcmp(argv[1], "-time") != 0) {
+        fprintf(stderr, "invalid top option\n");
+        return 1;
+    }
+
+    count = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next) {
+        count++;
+    }
+
+    if (count == 0) {
+        printf("No background jobs.\n"); /* 01문서 7-3 */
+        return 0;
+    }
+
+    /* 리스트를 출력용 배열로 복사 - 원본 연결 리스트는 정렬하지 않는다 (01문서 7-3) */
+    entries = (TopEntry *)malloc(sizeof(TopEntry) * (size_t)count);
+    if (entries == NULL) {
+        perror("malloc");
+        return -1;
+    }
+
+    now = time(NULL);
+    i = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next, i++) {
+        entries[i].proc = cur;
+        if (strcmp(argv[1], "-cpu") == 0) {
+            entries[i].metric = cur->cpu_usage;
+        } else if (strcmp(argv[1], "-mem") == 0) {
+            entries[i].metric = (double)cur->mem_usage_kb;
+        } else { /* -time: 현재 시각 - start_time 내림차순 (01문서 7-2) */
+            entries[i].metric = difftime(now, cur->start_time);
+        }
+    }
+
+    qsort(entries, (size_t)count, sizeof(TopEntry), compare_top_entry_desc);
+
+    print_jobs_header();
+    for (i = 0; i < count; i++) {
+        print_job_row(i + 1, entries[i].proc);
+    }
+
+    /* [free] 정렬용 임시 배열 해제 - 원본 ProcessInfo 노드는 그대로 리스트 소유 (03문서 6-2) */
+    free(entries);
+
+    return 0;
+}
+
+int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_list)
+{
+    *should_exit = 0;
+
+    if (strcmp(argv[0], "cd") == 0) {
+        return handle_cd(argc, argv);
+    } else if (strcmp(argv[0], "pwd") == 0) {
+        return handle_pwd(argc, argv);
+    } else if (strcmp(argv[0], "help") == 0) {
+        return handle_help(argc, argv);
+    } else if (strcmp(argv[0], "jobs") == 0) {
+        return handle_jobs(argc, argv, job_list);
+    } else if (strcmp(argv[0], "top") == 0) {
+        return handle_top(argc, argv, job_list);
+    } else if (strcmp(argv[0], "exit") == 0) {
+        int result = handle_exit(argc, argv);
+        if (result == 0) {
+            *should_exit = 1;
+        }
+        return result;
+    }
+
+    /* is_builtin() 확인 없이 호출된 방어적 상황 */
+    fprintf(stderr, "error: unknown builtin command '%s'\n", argv[0]);
+    return -1;
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include "executor.h"
+#include "commands.h"
+#include "process.h"
+#include "tuk_shell.h"
+
+/*
+ * execute_external
+ *  - fork() 후 자식은 execvp()로 프로그램 교체.
+ *  - execvp 실패 시 자식은 perror + exit(1)만 하고, 부모 자원(리스트/히스토리 등)에는
+ *    절대 접근하지 않는다 (05_개발철칙명세서.md 3-2 "자식 프로세스 에러 전파 차단").
+ *  - 백그라운드 실행 시 ProcessInfo 노드를 생성해 job_list에 등록한다 (2단계).
+ */
+static int execute_external(char **argv, int background_flag, const char *raw_command,
+                             ProcessInfo **job_list)
+{
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid < 0) {
+        perror("fork"); /* 05문서 3-1 */
+        return -1;
+    }
+
+    if (pid == 0) {
+        /* --- 자식 프로세스 --- */
+        if (execvp(argv[0], argv) == -1) {
+            perror(argv[0]);
+            exit(1); /* 부모가 waitpid로 종료코드 회수 가능하도록 즉시 종료 */
+        }
+        /* execvp 성공 시 이 지점에 도달하지 않음 */
+    }
+
+    /* --- 부모 프로세스 --- */
+    if (background_flag) {
+        ProcessInfo *node = create_process_node(pid, argv, raw_command);
+
+        if (node == NULL) {
+            /* 노드 생성 실패해도 자식 프로세스 자체는 이미 실행 중 - 등록만 실패 처리 */
+            fprintf(stderr, "warning: failed to register background job (pid=%d)\n", (int)pid);
+        } else if (append_process(job_list, node) != 0) {
+            fprintf(stderr, "warning: failed to append background job (pid=%d)\n", (int)pid);
+            free(node); /* 리스트에 들어가지 못한 노드는 즉시 해제 (누수 방지) */
+        }
+
+        /* 시작 메시지 형식 - 03문서 4-4, 색상 TU SKY BLUE */
+        printf(TU_SKY_BLUE "[bg] pid=%d command=\"%s\"\n" COLOR_RESET,
+               (int)pid, raw_command);
+        return 0;
+    }
+
+    /* 포그라운드: 자식 종료까지 대기 후 REPL 복귀 (03문서 4-3) */
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid");
+        return -1;
+    }
+
+    return 0;
+}
+
+int execute_command(int argc, char **argv, int background_flag, const char *raw_command,
+                     int *should_exit, ProcessInfo **job_list)
+{
+    *should_exit = 0;
+
+    if (argc <= 0 || argv[0] == NULL) {
+        return 0;
+    }
+
+    if (is_builtin(argv[0])) {
+        /*
+         * 백그라운드 금지 내장 명령어 (01문서 5-3): 현재 인식되는 cd/pwd/help/exit
+         * 전부 금지 목록에 포함된다. jobs/top이 추가되어도 is_builtin()만
+         * 확장하면 되므로 이 로직은 변경할 필요가 없다.
+         */
+        if (background_flag) {
+            fprintf(stderr, "built-in command cannot run in background\n");
+            return 1;
+        }
+        return execute_builtin(argc, argv, should_exit, job_list);
+    }
+
+    return execute_external(argv, background_flag, raw_command, job_list);
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "history.h"
+#include "tuk_shell.h"
+
+#define HISTORY_INITIAL_CAPACITY 64
+
+/*
+ * dup_string
+ *  - strdup()은 표준 C11에 없고 POSIX 확장이라 -std=c11 빌드에서 선언 경고를 피하기 위해
+ *    직접 구현한다.
+ *  - 해제 시점: 호출부(history_append_to_buffer)가 실패 시 즉시 free하거나,
+ *    성공 시 ctx->entries에 보관했다가 history_close()에서 일괄 free한다.
+ */
+static char *dup_string(const char *src)
+{
+    size_t len = strlen(src) + 1;
+    char *copy = (char *)malloc(len);
+
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, src, len);
+    return copy;
+}
+
+/*
+ * history_append_to_buffer
+ *  - line을 복제하여 ctx->entries에 추가한다. 필요 시 realloc으로 배열을 2배 확장한다.
+ *  - 성공 0, 실패 -1 (malloc/realloc 실패).
+ *
+ * [malloc 지점] dup_string()의 결과와 realloc된 entries 배열은
+ * history_close()에서 세션 종료 시 일괄 free된다 (05문서 2-1).
+ */
+static int history_append_to_buffer(HistoryContext *ctx, const char *line)
+{
+    char *copy;
+
+    if (ctx->count >= ctx->capacity) {
+        int new_capacity = (ctx->capacity == 0) ? HISTORY_INITIAL_CAPACITY : ctx->capacity * 2;
+        char **new_entries = (char **)realloc(ctx->entries, sizeof(char *) * (size_t)new_capacity);
+
+        if (new_entries == NULL) {
+            perror("malloc"); /* 03문서 7-3: 메모리 버퍼 추가 실패, 파일 저장은 이미 완료된 상태 */
+            return -1;
+        }
+        ctx->entries = new_entries;
+        ctx->capacity = new_capacity;
+    }
+
+    copy = dup_string(line);
+    if (copy == NULL) {
+        perror("malloc");
+        return -1;
+    }
+
+    ctx->entries[ctx->count] = copy;
+    ctx->count++;
+    return 0;
+}
+
+void history_init(HistoryContext *ctx)
+{
+    char line_buf[MAX_INPUT_LENGTH];
+
+    ctx->entries = NULL;
+    ctx->count = 0;
+    ctx->capacity = 0;
+    ctx->fp = NULL;
+    ctx->enabled = 0;
+
+    /* "a+": 없으면 생성, 있으면 유지. 쓰기는 항상 파일 끝에, 읽기는 위치 지정 필요 */
+    ctx->fp = fopen(HISTORY_FILE_NAME, "a+");
+    if (ctx->fp == NULL) {
+        perror("history"); /* 01문서 8-3: 실패해도 쉘 전체 종료로 이어지지 않음 */
+        return; /* enabled=0 유지 -> 이후 history_add는 아무 동작 안 함 */
+    }
+
+    ctx->enabled = 1;
+
+    /* 기존 히스토리 로드 - 01문서 8-2, 03문서 7-2 */
+    rewind(ctx->fp);
+    while (fgets(line_buf, sizeof(line_buf), ctx->fp) != NULL) {
+        size_t len = strlen(line_buf);
+
+        if (len > 0 && line_buf[len - 1] == '\n') {
+            line_buf[len - 1] = '\0';
+        }
+        if (line_buf[0] != '\0') {
+            /* 로드 단계에서 메모리 실패해도 파일 자체는 이미 존재하므로 쉘은 계속 진행 */
+            history_append_to_buffer(ctx, line_buf);
+        }
+    }
+}
+
+void history_add(HistoryContext *ctx, const char *line)
+{
+    if (line == NULL || line[0] == '\0') {
+        return; /* 빈 줄은 저장하지 않음 - 01문서 8-1 */
+    }
+
+    if (!ctx->enabled || ctx->fp == NULL) {
+        return; /* 히스토리 비활성화 상태 - 01문서 8-3 */
+    }
+
+    if (fprintf(ctx->fp, "%s\n", line) < 0) {
+        perror("history"); /* 03문서 7-3: 파일 쓰기 실패해도 현재 명령 실행은 계속 진행 */
+    } else if (fflush(ctx->fp) != 0) {
+        perror("history");
+    }
+
+    /* 메모리 버퍼 추가 실패는 파일 저장에 영향 주지 않음 (이미 위에서 완료됨) */
+    history_append_to_buffer(ctx, line);
+}
+
+void history_close(HistoryContext *ctx)
+{
+    int i;
+
+    if (ctx->fp != NULL) {
+        fflush(ctx->fp); /* 05문서 2-2: 디스크에 물리적으로 기록되도록 보장 */
+        fclose(ctx->fp);
+        ctx->fp = NULL;
+    }
+
+    /* [free] 세션 종료 시 메모리 버퍼에 남아있던 모든 문자열과 배열 자체 해제 (05문서 2-1) */
+    for (i = 0; i < ctx->count; i++) {
+        free(ctx->entries[i]);
+    }
+    free(ctx->entries);
+    ctx->entries = NULL;
+    ctx->count = 0;
+    ctx->capacity = 0;
+}
+
+#include <stdio.h>
+#include <string.h>
+#include "tuk_shell.h"
+#include "parser.h"
+#include "executor.h"
+#include "process.h"
+#include "history.h"
+
+int main(void)
+{
+    char line[MAX_INPUT_LENGTH];
+    char raw_line[MAX_INPUT_LENGTH];     /* 히스토리 저장용: '&' 포함 원본 그대로 */
+    char command_line[MAX_INPUT_LENGTH]; /* 실행/메시지용: '&' 제거본 (5단계와 동일) */
+    char *argv[MAX_ARGS + 1];
+    int argc;
+    int background_flag;
+    int should_exit;
+    size_t len;
+    ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
+    HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
+
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 6단계: 히스토리 파일 입출력\n" COLOR_RESET);
+
+    history_init(&history); /* 03문서 2-1 [3]: .tuk_history 열기 및 기존 이력 로드 */
+
+    while (1) {
+        /* 백그라운드 상태 갱신: REPL 한 사이클 시작 직전 (03문서 5-1) */
+        refresh_all_processes(&job_list);
+
+        /* [1] 프롬프트 출력 - TU BLUE */
+        printf(TU_BLUE "TUK-OS > " COLOR_RESET);
+        fflush(stdout);
+
+        /* [2] 한 줄 입력 수신 */
+        if (fgets(line, sizeof(line), stdin) == NULL) {
+            printf("\n");
+            break; /* EOF -> 종료 파이프라인 */
+        }
+
+        len = strlen(line);
+        if (len > 0 && line[len - 1] != '\n') {
+            int c;
+            fprintf(stderr, "error: input too long (max %d)\n", MAX_INPUT_LENGTH - 1);
+            while ((c = getchar()) != '\n' && c != EOF) {
+                /* 남은 입력 버퍼 비우기 */
+            }
+            continue;
+        }
+
+        /* [3]/[4] 개행 제거 후 원본 문자열 보관 (히스토리용, 이후 수정하지 않음) */
+        if (len > 0 && line[len - 1] == '\n') {
+            line[len - 1] = '\0';
+        }
+        strncpy(raw_line, line, sizeof(raw_line) - 1);
+        raw_line[sizeof(raw_line) - 1] = '\0';
+        strncpy(command_line, line, sizeof(command_line) - 1);
+        command_line[sizeof(command_line) - 1] = '\0';
+
+        /* [5],[6] 토큰화 + '&' 검사 (line 버퍼는 여기서 파괴됨) */
+        argc = parse_command(line, argv, &background_flag);
+
+        /* [7] 히스토리 동기화: 빈 줄이 아니면 파싱 성공 여부와 무관하게 원본 그대로 저장
+           (03문서 3-1 순서 7, 01문서 8-1) */
+        if (argc != 0) {
+            history_add(&history, raw_line);
+        }
+
+        if (argc == 0) {
+            continue; /* 빈 줄 */
+        }
+        if (argc < 0) {
+            continue; /* 파싱 오류: 메시지는 parse_command에서 이미 출력됨 */
+        }
+
+        /* 03문서 4-4 메시지 포맷과 일치시키기 위해 command_line에서 '&' 제거 */
+        strip_background_marker(command_line, background_flag);
+
+        execute_command(argc, argv, background_flag, command_line, &should_exit, &job_list);
+
+        if (should_exit) {
+            break;
+        }
+    }
+
+    /* 종료 파이프라인: 리스트 노드 -> 히스토리 -> 기타 버퍼 순 (03문서 9장) */
+    free_process_list(&job_list);
+    history_close(&history);
+
+    printf(TU_BLUE "TUK-Shell을 종료합니다.\n" COLOR_RESET);
+    return 0;
+}
+
+#include <stdio.h>
+#include <string.h>
+#include "parser.h"
+#include "tuk_shell.h"
+
+/*
+ * 이번 단계(1단계) 구현 범위:
+ *  - 공백/탭 기준 토큰화
+ *  - 마지막 독립 토큰 "&" 검사 (붙어있는 "cmd&" 형태는 02_인터페이스명세서.md 2-2 기준
+ *    미지원으로 간주 -> 하나의 토큰으로 취급되어 & 판정에서 제외됨)
+ *  - MAX_ARGS 초과 시 오류 처리
+ *  - 리다이렉션('>', '<'), 파이프('|'), 따옴표('"', '\'')는 01_상세기능명세서.md 4-3에 따라
+ *    본 단계 범위 밖이므로 명시적 오류로 거부한다 (execvp에 리터럴 인자로 전달되어
+ *    의도치 않은 동작을 일으키는 것을 방지 - 5단계 테스트에서 실제로 발견된 문제:
+ *    "yes > /dev/null &" 를 그냥 통과시키면 yes가 ">"와 "/dev/null"을 인자로 받아
+ *    무한 반복 출력하며 터미널을 뒤덮는 사고로 이어짐)
+ *
+ * 이 함수는 동적 메모리를 사용하지 않는다(strtok은 line 버퍼를 직접 사용).
+ * 따라서 별도의 free() 지점이 없다.
+ */
+
+/* 토큰 안에 리다이렉션/파이프/따옴표 문자가 있는지 검사 */
+static int has_unsupported_syntax(const char *token)
+{
+    for (; *token != '\0'; token++) {
+        if (*token == '>' || *token == '<' || *token == '|' ||
+            *token == '"' || *token == '\'') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int parse_command(char *line, char **argv, int *background_flag)
+{
+    int argc = 0;
+    int i;
+    char *token;
+    const char *delim = " \t";
+
+    *background_flag = 0;
+
+    /* 빈 줄(공백/탭만 있는 경우 포함) 처리 - 4-2 순서 2번 */
+    token = strtok(line, delim);
+    if (token == NULL) {
+        return 0;
+    }
+
+    while (token != NULL) {
+        if (argc >= MAX_ARGS) {
+            /* 토큰 수 초과 시 잘라서 실행하지 않고 오류만 출력 - 01문서 4-3 */
+            fprintf(stderr, "error: too many arguments (max %d)\n", MAX_ARGS);
+            return -1;
+        }
+        argv[argc++] = token;
+        token = strtok(NULL, delim);
+    }
+    argv[argc] = NULL; /* argv[argc] = NULL 규약 - 02문서 2-2 */
+
+    /* 마지막 토큰이 "&"이면 백그라운드 플래그 설정 후 토큰 목록에서 제거 - 4-2 순서 6번 */
+    if (argc > 0 && strcmp(argv[argc - 1], "&") == 0) {
+        *background_flag = 1;
+        argv[argc - 1] = NULL;
+        argc--;
+    }
+
+    /* 리다이렉션/파이프/따옴표 거부 - 01문서 4-3 */
+    for (i = 0; i < argc; i++) {
+        if (has_unsupported_syntax(argv[i])) {
+            fprintf(stderr,
+                    "error: redirection('>','<'), pipe('|'), quotes are not supported in this stage\n");
+            return -1;
+        }
+    }
+
+    return argc;
+}
+
+void strip_background_marker(char *raw_line, int background_flag)
+{
+    size_t len;
+
+    if (!background_flag || raw_line == NULL) {
+        return;
+    }
+
+    len = strlen(raw_line);
+    while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+        raw_line[--len] = '\0';
+    }
+    if (len > 0 && raw_line[len - 1] == '&') {
+        raw_line[--len] = '\0';
+        while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+            raw_line[--len] = '\0';
+        }
+    }
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include "process.h"
+#include "system_info.h"
+#include "tuk_shell.h"
+
+ProcessInfo *create_process_node(pid_t pid, char **argv, const char *raw_command)
+{
+    ProcessInfo *node;
+
+    /*
+     * [malloc 지점 1] 노드 생성.
+     * - 해제 시점: refresh_all_processes()에서 종료가 감지되어 remove_process()가
+     *   호출될 때, 또는 쉘 종료 시 free_process_list()가 호출될 때 free()된다.
+     */
+    node = (ProcessInfo *)malloc(sizeof(ProcessInfo));
+    if (node == NULL) {
+        perror("malloc"); /* 05문서 3-1 */
+        return NULL;      /* 등록 실패: 리스트에 넣지 않고 오류만 출력 (01문서 3-3) */
+    }
+
+    node->pid = pid;
+
+    if (argv != NULL && argv[0] != NULL) {
+        strncpy(node->name, argv[0], PROC_NAME_MAX - 1);
+        node->name[PROC_NAME_MAX - 1] = '\0';
+    } else {
+        node->name[0] = '\0';
+    }
+
+    if (raw_command != NULL) {
+        strncpy(node->command, raw_command, PROC_COMMAND_MAX - 1);
+        node->command[PROC_COMMAND_MAX - 1] = '\0';
+    } else {
+        node->command[0] = '\0';
+    }
+
+    node->start_time = time(NULL);
+    node->cpu_usage = 0.0;
+    node->mem_usage_kb = 0;
+    node->status = PROC_RUNNING;
+    node->exit_code = -1; /* 실행 중 표시 (01문서 3-1) */
+    node->next = NULL;
+
+    return node;
+}
+
+int append_process(ProcessInfo **head, ProcessInfo *node)
+{
+    ProcessInfo *cur;
+
+    if (head == NULL || node == NULL) {
+        return -1;
+    }
+
+    if (*head == NULL) {
+        *head = node;
+        return 0;
+    }
+
+    cur = *head;
+    while (cur->next != NULL) {
+        cur = cur->next;
+    }
+    cur->next = node;
+
+    return 0;
+}
+
+int remove_process(ProcessInfo **head, pid_t pid)
+{
+    ProcessInfo *cur;
+    ProcessInfo *prev;
+
+    if (head == NULL) {
+        return -1;
+    }
+
+    cur = *head;
+    prev = NULL;
+
+    while (cur != NULL) {
+        if (cur->pid == pid) {
+            if (prev == NULL) {
+                *head = cur->next;
+            } else {
+                prev->next = cur->next;
+            }
+            /*
+             * [free 지점 1] 리스트에서 분리한 직후 즉시 해제.
+             * - 종료가 확인된 백그라운드 작업의 정상적인 회수 경로.
+             */
+            free(cur);
+            return 0;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    return -1; /* 대상 PID 없음 */
+}
+
+ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid)
+{
+    ProcessInfo *cur = head;
+
+    while (cur != NULL) {
+        if (cur->pid == pid) {
+            return cur;
+        }
+        cur = cur->next;
+    }
+
+    return NULL;
+}
+
+const char *process_status_to_string(ProcessStatus status)
+{
+    switch (status) {
+        case PROC_RUNNING:
+            return "RUNNING";
+        case PROC_STOPPED:
+            return "STOPPED";
+        case PROC_DONE:
+            return "DONE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+int refresh_all_processes(ProcessInfo **head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *next_node;
+    int wstatus;
+    pid_t result;
+
+    if (head == NULL) {
+        return -1;
+    }
+
+    cur = *head;
+
+    while (cur != NULL) {
+        /* 노드가 이번 반복에서 제거될 수 있으므로 다음 포인터를 미리 저장 */
+        next_node = cur->next;
+
+        result = waitpid(cur->pid, &wstatus, WNOHANG);
+
+        if (result == 0) {
+            /* 아직 종료되지 않음: 통계 갱신 시도 (03문서 5-2 [2]) */
+            if (update_process_stats(cur) != 0) {
+                /* 실패 시 규칙: cpu/mem 0으로, status는 기존 값 유지 (01문서 3-4) */
+                cur->cpu_usage = 0.0;
+                cur->mem_usage_kb = 0;
+            }
+        } else if (result == cur->pid) {
+            /* 종료 확인됨 (03문서 5-2 [4], 5-4 상태 전이) */
+            if (WIFEXITED(wstatus)) {
+                cur->exit_code = WEXITSTATUS(wstatus);
+            } else if (WIFSIGNALED(wstatus)) {
+                cur->exit_code = 128 + WTERMSIG(wstatus);
+            } else {
+                cur->exit_code = -1;
+            }
+            cur->status = PROC_DONE;
+
+            /* 종료 메시지 형식 - 03문서 5-3 */
+            printf(TU_SKY_BLUE "[done] pid=%d exit=%d command=\"%s\"\n" COLOR_RESET,
+                   (int)cur->pid, cur->exit_code, cur->command);
+
+            /* 리스트 제거 + free는 remove_process 내부에서 수행 */
+            remove_process(head, cur->pid);
+        } else {
+            /*
+             * result < 0 (예: ECHILD): 이미 다른 경로로 회수되었거나
+             * 자식이 아닌 경우. 쉘 전체를 중단시키지 않고 다음 노드로 진행한다.
+             */
+        }
+
+        cur = next_node;
+    }
+
+    return 0;
+}
+
+void free_process_list(ProcessInfo **head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *tmp;
+
+    if (head == NULL) {
+        return;
+    }
+
+    cur = *head;
+    while (cur != NULL) {
+        tmp = cur;
+        cur = cur->next;
+        /*
+         * [free 지점 2] 쉘 종료(exit/EOF) 시 잔여 노드 전체 해제.
+         * - 정상적으로 종료를 감지하지 못한 채 쉘이 끝나는 경우의 최종 안전망.
+         */
+        free(tmp);
+    }
+    *head = NULL;
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include "system_info.h"
+
+/* 리눅스 기본값(HZ=100)을 폴백으로 사용, sysconf 실패 시에만 적용 */
+#define DEFAULT_CLK_TCK 100
+
+static long get_clock_ticks_per_sec(void)
+{
+    long ticks = sysconf(_SC_CLK_TCK);
+
+    if (ticks <= 0) {
+        ticks = DEFAULT_CLK_TCK;
+    }
+    return ticks;
+}
+
+/*
+ * read_proc_stat_times
+ *  - /proc/[pid]/stat에서 utime(14번째 필드), stime(15번째 필드)을 파싱한다.
+ *  - comm(2번째 필드)은 괄호로 감싸져 있고 내부에 공백/괄호가 포함될 수 있으므로,
+ *    마지막 ')' 위치를 기준으로 그 뒤부터 상대 위치로 안전하게 파싱한다.
+ *  - 성공 0, 실패(파일 없음/파싱 실패) -1.
+ */
+static int read_proc_stat_times(pid_t pid, unsigned long *utime, unsigned long *stime)
+{
+    char path[64];
+    char buf[512];
+    FILE *fp;
+    char *comm_end;
+    unsigned long ut, st;
+    int n;
+
+    snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return -1; /* 프로세스가 이미 종료되어 접근 불가능한 경우 등 */
+    }
+
+    if (fgets(buf, sizeof(buf), fp) == NULL) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+
+    comm_end = strrchr(buf, ')');
+    if (comm_end == NULL) {
+        return -1;
+    }
+
+    /*
+     * comm_end 다음 필드부터: state(1) ppid(2) pgrp(3) session(4) tty_nr(5)
+     * tpgid(6) flags(7) minflt(8) cminflt(9) majflt(10) cmajflt(11)
+     * utime(12) stime(13) ...  (comm 제외 상대 인덱스 기준)
+     */
+    n = sscanf(comm_end + 1,
+               " %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
+               &ut, &st);
+    if (n != 2) {
+        return -1;
+    }
+
+    *utime = ut;
+    *stime = st;
+    return 0;
+}
+
+/*
+ * read_proc_status_rss
+ *  - /proc/[pid]/status에서 VmRSS(KB) 값을 파싱한다.
+ *  - 성공 0, 실패(파일 없음/필드 없음) -1.
+ */
+static int read_proc_status_rss(pid_t pid, long *rss_kb)
+{
+    char path[64];
+    char line[256];
+    FILE *fp;
+    int found = 0;
+
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            long value;
+            if (sscanf(line + 6, "%ld", &value) == 1) {
+                *rss_kb = value;
+                found = 1;
+            }
+            break;
+        }
+    }
+    fclose(fp);
+
+    return found ? 0 : -1;
+}
+
+int update_process_stats(ProcessInfo *proc)
+{
+    unsigned long utime, stime;
+    long rss_kb;
+    long ticks_per_sec;
+    double total_cpu_seconds;
+    double elapsed_seconds;
+    time_t now;
+
+    if (proc == NULL) {
+        return -1;
+    }
+
+    if (read_proc_stat_times(proc->pid, &utime, &stime) != 0) {
+        return -1; /* 호출부가 cpu=0.0, mem=0으로 처리 (01문서 3-4) */
+    }
+
+    if (read_proc_status_rss(proc->pid, &rss_kb) != 0) {
+        return -1;
+    }
+
+    ticks_per_sec = get_clock_ticks_per_sec();
+    total_cpu_seconds = (double)(utime + stime) / (double)ticks_per_sec;
+
+    now = time(NULL);
+    elapsed_seconds = difftime(now, proc->start_time);
+    if (elapsed_seconds <= 0.0) {
+        elapsed_seconds = 1.0; /* 등록 직후 0으로 나누기 방지 */
+    }
+
+    /* [설계 노트] system_info.h 주석 참고: "시작 이후 누적 평균 CPU 점유율" */
+    proc->cpu_usage = (total_cpu_seconds / elapsed_seconds) * 100.0;
+    proc->mem_usage_kb = rss_kb;
+
+    return 0;
+}
+
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c11 -Iinclude
+SRC_DIR = src
+BUILD_DIR = build
+TARGET = tuk_shell
+
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/parser.c $(SRC_DIR)/commands.c $(SRC_DIR)/executor.c \
+       $(SRC_DIR)/process.c $(SRC_DIR)/system_info.c $(SRC_DIR)/history.c
+OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+clean:
+	rm -rf $(BUILD_DIR) $(TARGET)
+
+.PHONY: all clean
+
+
+# [최종 프롬포트] TUK-Shell 프로젝트 명세서
+
+너는 시스템 프로그래밍(Unix/Linux 시스템 콜, 프로세스 관리)에 능숙한 시니어 C 개발자야. 아래 명세에 맞는 "TUK-Shell" 프로젝트를 함께 만들어줘.
+
+## 1. 프로젝트 개요
+
+* **이름:** TUK-Shell (한국공학대학교 AI소프트웨어학과 전용 커스텀 쉘)
+* **목표:** 기존 호스트 쉘(Bash, Zsh, PowerShell) 위에서 서브 프로세스로 동작하며, 외부 명령어를 실행하고 백그라운드 프로세스를 자체적으로 관리/모니터링하는 미니 쉘을 C언어로 구현한다.
+* **실행 시 프롬프트:** `TUK-OS > `
+* **개발 환경:** Linux(Ubuntu 기준), gcc, POSIX 시스템콜(fork, execvp, waitpid 등) 사용.
+* **UI/UX 핵심 포인트 (TUK Color):** CLI 출력 시 한국공학대학교 핵심 색상을 ANSI True Color로 적용하여 출력한다.
+* **TU BLUE (#1758A8):** 기본 프롬프트 및 강조 텍스트
+* **TU SKY BLUE (#068FD3):** 프로세스 상태 및 주요 정보 출력
+* **TU MINT (#01B3CD):** 커스텀 명령어(시간표, 학식 등) 결과 출력
+
+
+
+## 2. 팀원 역할 및 타겟 환경
+
+각 팀원은 본인의 주력 호스트 쉘 위에서 TUK-Shell이 완벽하게 호환 및 구동되도록 각자의 환경에서 구현과 테스트를 분담한다.
+
+* **우진 (BASH):** Bash 환경에서의 TUK-SHELL 구현
+* **원종우 (ZSH):** Zsh 환경에서의 TUK-SHELL 구현
+* **동현 (POWERSHELL):** Windows PowerShell + WSL(Ubuntu) 환경에서의 TUK-SHELL
+
+## 3. 필수 구현 항목
+
+### [1] 구조체 & 동적 메모리
+
+* `ProcessInfo` 구조체 설계 (PID, 프로세스 이름, 명령어 전체, 시작시각, CPU/메모리 사용량, 상태(RUNNING/STOPPED/DONE) 등 포함)
+* 백그라운드 프로세스 목록을 연결 리스트(Linked List)로 관리 (malloc/free로 노드 생성·삭제, 프로세스 종료 시 반드시 메모리 해제)
+
+### [2] 내장 명령어 (Built-in Commands)
+
+* `cd`, `pwd`, `exit`, `help` 등 기본 내장 명령어 구현
+* 외부 명령어는 `fork()` + `execvp()`로 실행하여 기존 쉘 명령어 완벽 호환
+* `&`로 끝나는 명령어는 백그라운드 실행 후 `ProcessInfo`에 등록
+
+### [3] 검색 기능
+
+* `jobs -pid [PID]` : PID로 특정 작업 검색
+* `jobs -name [이름]` : 이름으로 검색 (부분 문자열 매칭도 고려)
+* 리눅스 `ps`/`grep`과 유사한 출력 포맷
+
+### [4] 정렬 기능
+
+* `top` 명령어 구현: CPU 사용량 / 메모리 점유율 / 실행시간 기준으로 정렬 옵션 제공 (예: `top -cpu`, `top -mem`, `top -time`)
+* 정렬 알고리즘은 직접 구현 (qsort 콜백 함수 형태로)
+
+### [5] 파일 입출력
+
+* `/proc/[pid]/stat`, `/proc/[pid]/status` 등을 파싱해서 실제 CPU/메모리 정보를 가져오는 함수 구현
+* 명령어 히스토리를 `.tuk_history` 파일에 저장
+* 쉘 재시작 시 히스토리 로드 + 방향키 위/아래로 히스토리 탐색 (`termios` 활용, 선택사항)
+
+### [6] 캠퍼스 특화 커스텀 명령어 (교내 편의 기능)
+
+쉘 내부에서 동작하는 학교/캠퍼스 전용 내장 명령어를 추가로 구현한다. (우선 하드코딩된 더미 데이터나 로컬 텍스트/JSON 파일을 파싱해서 출력하는 형태로 구현하고, 추후 API 연동 확장이 가능하도록 함수 인터페이스를 분리해서 설계한다.)
+
+* **`schedule`:** 인자 없이 입력 시 AI소프트웨어학과의 시간표를 CLI 표 형태로 출력
+* **`bus` (셔틀버스 시간표):** `-1` (1캠퍼스 셔틀), `-2` (2캠퍼스 셔틀)
+* **`bob` (학식/식당 메뉴):** `-t` (TIP 지하 식당), `-E` (E동 레스토랑), `-d` (대신식당)
+* **`notice` (학교 공지사항):** `-g` (일반), `-a` (학사), `-s` (장학), `-n [숫자]` (최근 n개의 공지만 필터링, 타 옵션과 조합 가능)
+* **`map` (캠퍼스 건물 및 편의시설 안내):** `-A` ~ `-G` (층별 안내), `-f` (교내 편의시설), `-find [강의실번호]` (위치 안내)
+* **`weather` (시흥 캠퍼스 실시간 환경):** `-c` (현재 거북섬/정왕동 날씨), `-w` (주간 예보), `-d` (미세먼지)
+* **`contact` (연락처 검색):** `-p [이름]` (교수님 검색), `-d [부서명]` (행정부서), `-e` (긴급 연락처 모아보기)
+
+> **※ 파싱 규칙:** 옵션 파싱 시 기존 `jobs -pid`, `top -cpu` 등과 동일한 방식(`argv` 순회 + `strcmp`)으로 처리하여 명령어 파싱 구조를 일관되게 유지한다.
+
+## 4. 개발 순서 (단계별 진행)
+
+* **1단계:** 기본 REPL 루프 (프롬프트 출력 → 입력 파싱 → fork/exec로 외부 명령어 실행 → 결과 대기)
+* **2단계:** 구조체 정의 + 연결 리스트 기반 백그라운드 작업 관리
+* **3단계:** jobs 검색 기능 추가
+* **4단계:** top 정렬 기능 추가
+* **5단계:** /proc 파일 파싱으로 실제 시스템 데이터 연동
+* **6단계:** 히스토리 파일 입출력 추가
+* **7단계:** 캠퍼스 특화 커스텀 명령어 추가 (더미 데이터 기반 우선 구현)
+
+## 5. 요청 방식 (AI 지시사항)
+
+* 한 번에 전체 코드를 몰아서 주지 말고, 내가 "다음 단계 진행해줘"라고 요청할 때마다 **단계별로 코드를 보여주면서 설명해줘.**
+* 각 단계마다 컴파일 및 실행 방법(`gcc` 명령어 등)을 같이 알려줘.
+* 시스템 콜 사용 시 에러 처리(반환값 체크, `perror`)를 반드시 포함해줘.
+* 메모리 누수가 없는지 주석으로 `free()` 시점을 명시해줘.
+
+---
+# 01. TUK-Shell 상세기능명세서
+
+> **기준 문서**: `docs/plan.md`   
+> **담당자**: 원종우 (ZSH 파트)
+> **담당 범위**: 기본 REPL 루프, 명령어 파싱, 내장 명령어, 히스토리, BASH 환경 검증
+> **태그 범례**: `[원종우]` 직접 구현, `[공통]` 전체 팀 공유 로직, `[타 파트]` 연동 대상
+
+---
+
+## 1. 문서 목적
+
+본 문서는 `docs/plan.md`의 필수 구현 항목과 1~7단계 개발 순서를 기준으로, BASH 파트에서 구현해야 할 세부 기능과 팀 간 연동 경계를 정의한다. 본 문서의 목표는 다음과 같다.
+
+- BASH 파트가 직접 구현할 기능과 공통 기능을 구분한다.
+- 단계별 구현 순서가 코드 구조에 반영되도록 기능 간 선후관계를 명시한다.
+- 구현 시 흔들리기 쉬운 예외 처리, 메모리 해제, 옵션 파싱 규칙을 고정한다.
+
+---
+
+## 2. 단계별 기능 범위 추적
+
+| 계획 단계 | 기능 | 본 문서 반영 위치 |
+|-----------|------|-----------|
+| 1단계 | 기본 REPL 루프 | 4장, 5장 | 
+| 2단계 | `ProcessInfo` + 연결 리스트 | 3장 |
+| 3단계 | `jobs` 검색 | 6장 |
+| 4단계 | `top` 정렬 | 7장 | 
+| 5단계 | `/proc` 기반 시스템 정보 | 3장, 7장 | 
+| 6단계 | 히스토리 파일 입출력 | 8장 | 
+| 7단계 | 캠퍼스 특화 명령어 | 9장 | 
+
+---
+
+## 3. 프로세스 관리 및 자료구조 `[공통]`
+
+### 3-1. `ProcessInfo` 구조체 필드 명세
+
+| 필드명 | 타입 | 설명 |
+|--------|------|------|
+| `pid` | `pid_t` | 백그라운드 자식 프로세스 ID |
+| `name` | `char[]` | 실행 파일명 또는 `argv[0]` |
+| `command` | `char[]` | 사용자가 입력한 원본 명령 문자열 |
+| `start_time` | `time_t` | 부모 쉘이 작업 등록한 시각 |
+| `cpu_usage` | `double` | 최신 CPU 사용률(%) |
+| `mem_usage_kb` | `long` | 최신 메모리 사용량(KB) |
+| `status` | `enum` | `RUNNING`, `STOPPED`, `DONE` |
+| `exit_code` | `int` | 종료 시 자식의 종료 코드, 실행 중이면 `-1` |
+| `next` | `struct ProcessInfo *` | 단일 연결 리스트 포인터 |
+
+### 3-2. 상태값 규칙
+
+- `RUNNING`: 백그라운드에서 실행 중이며 `waitpid(..., WNOHANG)` 결과 미종료 상태
+- `STOPPED`: 시그널 또는 시스템 상태에 의해 일시 정지된 상태
+- `DONE`: 종료가 확인되었으나 사용자에게 아직 종료 사실이 출력되었거나 정리 직전 상태
+
+### 3-3. 연결 리스트 메모리 관리
+
+- 백그라운드 등록 시 `malloc(sizeof(ProcessInfo))`로 노드를 생성한다.
+- 등록 실패 시 해당 작업은 리스트에 넣지 않고 오류만 출력한다.
+- 종료 감지 후에는 리스트에서 노드를 분리한 다음 즉시 `free()` 한다.
+- `exit` 처리 시 남은 모든 노드를 순회하며 해제한다.
+- 해제 시점은 코드 주석으로 명시한다.
+
+### 3-4. 시스템 정보 수집 인터페이스 `[타 파트 - 동현]`
+
+BASH 파트는 `/proc` 파싱 구현 대신 아래 인터페이스를 호출하는 것을 전제로 한다.
+
+```c
+int update_process_stats(ProcessInfo *proc);
+```
+
+- 성공 시 `0` 반환, 실패 시 `-1` 반환
+- 실패 시 호출부는 `cpu_usage=0.0`, `mem_usage_kb=0`, 상태는 기존 값을 유지한다.
+- PID가 이미 종료되어 `/proc/[pid]` 접근이 불가능하면 호출부는 `waitpid()` 결과를 우선 신뢰한다.
+
+---
+
+## 4. REPL 입력 처리 기능 
+
+### 4-1. 프롬프트
+
+- 고정 프롬프트 문자열: `TUK-OS > `
+- 기본 출력 색상: TU BLUE (`#1758A8`)
+
+### 4-2. 입력 처리 순서
+
+1. 한 줄을 읽는다.
+2. 빈 줄이면 실행 없이 다음 루프로 진행한다.
+3. 개행 문자를 제거한다.
+4. 원본 문자열을 히스토리 저장용으로 별도 보관한다.
+5. 공백 기준 토큰화하여 `argv` 배열을 구성한다.
+6. 마지막 토큰이 `&`이면 백그라운드 실행 플래그를 세우고 토큰에서 제거한다.
+
+### 4-3. 입력 제약
+
+- 최대 입력 길이와 최대 토큰 수는 상수로 관리한다.
+- 토큰 수 초과 시 잘라서 실행하지 않고 오류 메시지를 출력한다.
+- 따옴표, 리다이렉션, 파이프는 본 단계 범위 밖이라면 미지원으로 명시적 오류를 반환한다.
+
+---
+
+## 5. 기본 내장 명령어
+
+### 5-1. 명령어 목록
+
+| 명령어 | 동작 설명 | 실패 시 동작 |
+|--------|-----------|-------------|
+| `cd [경로]` | 작업 디렉토리 변경 | `perror("cd")` 출력, 현재 디렉토리 유지 |
+| `pwd` | 현재 작업 디렉토리 절대 경로 출력 | `perror("pwd")` 출력 |
+| `help` | 사용 가능한 명령어와 옵션 요약 출력 | 도움말만 출력하고 루프 복귀 |
+| `exit` | 히스토리 flush/close, 프로세스 정리 후 종료 | 정리 실패가 있어도 종료 시도 |
+
+### 5-2. 인자 검증 규칙
+
+- `cd`:
+  - 인자 0개이면 홈 디렉토리로 이동하거나, 명시적으로 미지원 처리 중 하나를 구현 전에 팀 합의해야 한다.
+  - 인자 2개 이상이면 `usage: cd [path]` 출력
+- `pwd`, `help`, `exit`:
+  - 추가 인자가 있으면 사용법 메시지 출력 후 실행하지 않는다.
+
+### 5-3. 백그라운드 금지 규칙
+
+다음 내장 명령어는 `&`와 함께 사용할 수 없다.
+
+- `cd`
+- `pwd`
+- `help`
+- `exit`
+- `jobs`
+- `top`
+
+금지된 조합이 들어오면 `built-in command cannot run in background` 오류를 출력하고 루프 복귀한다.
+
+---
+
+## 6. 작업 검색 기능 `jobs` 
+
+### 6-1. 지원 형식
+
+- `jobs`
+- `jobs -pid [PID]`
+- `jobs -name [KEYWORD]`
+
+### 6-2. 검색 규칙
+
+- `jobs` 단독 호출: 전체 백그라운드 작업 출력
+- `jobs -pid [PID]`: 숫자 PID 완전 일치 검색
+- `jobs -name [KEYWORD]`: `name` 필드 기준 부분 문자열 검색
+- 검색 결과가 없으면 `No matching job found.` 출력
+
+### 6-3. 잘못된 입력 처리
+
+- `jobs -pid` 또는 `jobs -name` 뒤 인자가 없으면 사용법 출력
+- 지원하지 않는 옵션은 `invalid jobs option` 출력
+- `jobs -pid abc`처럼 숫자가 아니면 오류 처리
+
+### 6-4. 출력 컬럼
+
+```text
+[JOB#]  PID     STATUS    START_TIME  CPU%   MEM(KB)  COMMAND
+[1]     12345   RUNNING   14:32:01    2.3    4096     sleep 100
+```
+
+- `JOB#`: 리스트 출력 순서 기준 1부터 부여
+- `START_TIME`: `HH:MM:SS`
+- `CPU%`, `MEM(KB)`: 최신 갱신값 사용
+
+---
+
+## 7. 작업 정렬 기능 `top` 
+
+### 7-1. 지원 형식
+
+- `top -cpu`
+- `top -mem`
+- `top -time`
+
+### 7-2. 정렬 기준
+
+- `-cpu`: `cpu_usage` 내림차순
+- `-mem`: `mem_usage_kb` 내림차순
+- `-time`: 현재 시각 - `start_time` 내림차순
+
+### 7-3. 구현 규칙
+
+- 연결 리스트를 그대로 정렬하지 않고 출력용 배열 복사 후 `qsort()`로 정렬한다.
+- 비교 함수는 직접 구현한다.
+- 활성 작업이 0개면 `No background jobs.` 출력
+
+### 7-4. 잘못된 입력 처리
+
+- 옵션이 없거나 2개 이상이면 사용법 출력
+- 지원하지 않는 옵션이면 `invalid top option` 출력
+
+---
+
+## 8. 히스토리 관리 
+
+### 8-1. 저장 규칙
+
+- 파일명: `.tuk_history`
+- 저장 시점: 사용자가 엔터를 입력해 명령이 확정된 직후
+- 빈 줄은 저장하지 않는다.
+
+### 8-2. 로드 규칙
+
+- 쉘 시작 시 파일이 존재하면 전체를 읽어 메모리 버퍼에 로드한다.
+- 파일이 없으면 생성 후 계속 진행한다.
+
+### 8-3. 장애 허용 범위
+
+- 파일 열기 실패 시 `perror("history")` 출력 후 히스토리 기능만 비활성화한다.
+- 히스토리 실패가 쉘 전체 종료 사유가 되어서는 안 된다.
+
+### 8-4. 선택 기능
+
+- `termios` 기반 방향키 탐색은 선택 기능이다.
+- 미구현 시에도 파일 저장/로드는 필수 구현으로 유지한다.
+
+---
+
+## 9. 캠퍼스 특화 커스텀 명령어 
+
+### 9-1. ZSH 파트 책임
+
+- 명령어 진입점 식별
+- 옵션 파싱
+- 사용법 및 잘못된 옵션 처리
+- 대응되는 핸들러 함수 호출
+
+### 9-2. 지원 명령어
+
+| 명령어 | 옵션 | 설명 |
+|--------|------|------|
+| `schedule` | 없음 | AI소프트웨어학과 시간표 출력 |
+| `bus` | `-1`, `-2` | 1캠퍼스/2캠퍼스 셔틀 시간표 |
+| `bob` | `-t`, `-E`, `-d` | 식당별 메뉴 출력 |
+| `notice` | `-g`, `-a`, `-s`, `-n N` | 공지사항 분류 및 최근 N개 필터 |
+| `map` | `-A`~`-G`, `-f`, `-find ROOM` | 건물 안내 및 강의실 위치 |
+| `weather` | `-c`, `-w`, `-d` | 현재 날씨, 주간 예보, 미세먼지 |
+| `contact` | `-p NAME`, `-d DEPT`, `-e` | 교수, 부서, 긴급 연락처 |
+
+### 9-3. 공통 옵션 파싱 규칙
+
+- 모든 명령어는 `argv` 순회 + `strcmp`로 처리한다.
+- 필수 값이 필요한 옵션은 다음 인자가 존재하는지 검사한다.
+- 정의되지 않은 옵션은 각 명령어별 사용법을 출력한다.
+- `notice [-g|-a|-s] [-n N]`처럼 허용된 조합만 지원한다.
+
+### 9-4. 핸들러 인터페이스 예시
+
+```c
+int handle_schedule_command(int argc, char **argv);
+int handle_notice_command(int argc, char **argv);
+```
+
+- 성공 시 `0`, 사용법 오류 시 `1`, 데이터 로드 실패 시 `-1`
+- 출력 색상은 TU MINT (`#01B3CD`)를 기본으로 사용한다.
+
+---
+
+## 10. BASH 파트 완료 기준
+
+- `plan.md`의 1, 3, 4, 6단계가 BASH 환경에서 독립적으로 검증 가능해야 한다.
+- 공통 자료구조와 캠퍼스 명령어 진입점은 2, 5, 7단계 연동을 막지 않는 수준으로 고정되어야 한다.
+- 모든 시스템 콜과 메모리 할당 지점에는 실패 처리 규칙이 존재해야 한다.
+
+# 02. TUK-Shell 인터페이스명세서
+
+> **기준 문서**: `docs/plan.md`
+> **담당자**: 이우진 (BASH 파트)
+> **목적**: 사용자 CLI, 내부 함수 경계, OS/File 인터페이스를 구현 가능한 수준으로 고정
+
+---
+
+## 1. 사용자 인터페이스 (CLI/UX) `[공통]`
+
+### 1-1. 프롬프트 규격
+
+- 기본 문자열: `TUK-OS > `
+- ANSI True Color 적용 대상:
+  - TU BLUE (`#1758A8`): 프롬프트, 제목, 강조
+  - TU SKY BLUE (`#068FD3`): 작업 상태, PID, 시스템 정보
+  - TU MINT (`#01B3CD`): 캠퍼스 명령어 결과
+
+### 1-2. 공통 출력 규칙
+
+- 모든 출력은 한 줄 종료 시 `\n`을 포함한다.
+- 오류 메시지는 표준 에러 또는 명확히 구분되는 형식으로 출력한다.
+- 표 형식 출력은 컬럼 제목을 포함한다.
+- 색상 미지원 터미널에서도 내용 식별이 가능해야 하므로 색상만으로 의미를 구분하지 않는다.
+
+---
+
+## 2. 명령어 입력 인터페이스 `[우진]`
+
+### 2-1. 입력 단위
+
+- 한 번의 엔터 입력을 하나의 명령 단위로 처리한다.
+- 입력 버퍼는 `MAX_INPUT_LENGTH` 상수로 제한한다.
+- 토큰 배열은 `MAX_ARGS` 상수로 제한한다.
+
+### 2-2. 토큰화 규칙
+
+- 구분자: 공백, 탭
+- `argv[argc] = NULL` 종료 규약을 준수한다.
+- 마지막 독립 토큰 `&`만 백그라운드 플래그로 인정한다.
+- `sleep&`처럼 붙어 있는 형태는 미지원으로 간주하거나 사전 전처리 규칙을 별도로 둔다. 본 문서 기본안은 미지원이다.
+
+### 2-3. 명령 분기 우선순위
+
+1. 빈 입력 검사
+2. 내장 명령어 테이블 매칭
+3. 외부 명령어 실행
+
+---
+
+## 3. 사용자 명령어 인터페이스
+
+### 3-1. 기본 내장 명령어 
+
+| 명령어 | 사용 형식 | 정상 결과 | 오류/예외 |
+|--------|-----------|-----------|-----------|
+| `cd` | `cd [path]` | 작업 디렉토리 변경 | 경로 없음/과다 인자 시 사용법 또는 `perror` |
+| `pwd` | `pwd` | 절대 경로 출력 | 인자 존재 시 사용법 |
+| `help` | `help` | 명령어 사용법 출력 | 인자 존재 시 사용법 |
+| `exit` | `exit` | 자원 정리 후 종료 | 인자 존재 시 사용법 |
+
+### 3-2. 작업 관리 명령어 
+
+| 명령어 | 사용 형식 | 정상 결과 | 오류/예외 |
+|--------|-----------|-----------|-----------|
+| `jobs` | `jobs` | 전체 작업 목록 | 작업 없으면 빈 결과 메시지 |
+| `jobs -pid` | `jobs -pid PID` | 단일 PID 조회 | PID 누락/비숫자/미존재 |
+| `jobs -name` | `jobs -name KEYWORD` | 부분 문자열 검색 | 키워드 누락 |
+| `top -cpu` | `top -cpu` | CPU 내림차순 출력 | 옵션 오류 |
+| `top -mem` | `top -mem` | 메모리 내림차순 출력 | 옵션 오류 |
+| `top -time` | `top -time` | 실행시간 내림차순 출력 | 옵션 오류 |
+
+### 3-3. 캠퍼스 커스텀 명령어 
+
+| 명령어 | 사용 형식 | 인자 규칙 |
+|--------|-----------|-----------|
+| `schedule` | `schedule` | 인자 없음 |
+| `bus` | `bus -1` or `bus -2` | 옵션 1개 필수 |
+| `bob` | `bob -t` or `bob -E` or `bob -d` | 옵션 1개 필수 |
+| `notice` | `notice [-g \| -a \| -s] [-n N]` | 분류 옵션 최대 1개, `-n`은 선택 |
+| `map` | `map -A` ... `map -G`, `map -f`, `map -find ROOM` | `-find`는 값 필수 |
+| `weather` | `weather -c` or `weather -w` or `weather -d` | 옵션 1개 필수 |
+| `contact` | `contact -p NAME`, `contact -d DEPT`, `contact -e` | `-p`, `-d`는 값 필수 |
+
+### 3-4. 외부 명령어 `[공통]`
+
+| 사용 형식 | 실행 규칙 |
+|-----------|-----------|
+| `[cmd] [args...]` | `fork()` 후 자식에서 `execvp()` |
+| `[cmd] [args...] &` | 부모가 `waitpid(..., 0)` 대신 작업 등록 후 즉시 복귀 |
+
+---
+
+## 4. 내부 함수 인터페이스 `[공통]`
+
+### 4-1. REPL 및 파싱
+
+```c
+int shell_loop(void);
+int parse_command(char *line, char **argv, int *background_flag);
+int execute_command(int argc, char **argv, int background_flag);
+```
+
+- `parse_command`:
+  - 성공 시 `argc` 반환
+  - 빈 입력은 `0` 반환
+  - 파싱 오류는 `-1` 반환
+- `execute_command`:
+  - 정상 처리 `0`
+  - 사용법 오류 `1`
+  - 치명적 오류 `-1`
+
+### 4-2. 내장 명령어 핸들러
+
+```c
+int handle_cd(int argc, char **argv);
+int handle_pwd(int argc, char **argv);
+int handle_help(int argc, char **argv);
+int handle_exit(int argc, char **argv);
+int handle_jobs(int argc, char **argv);
+int handle_top(int argc, char **argv);
+```
+
+### 4-3. 프로세스 리스트 관리
+
+```c
+ProcessInfo *create_process_node(pid_t pid, char **argv, const char *raw_command);
+int append_process(ProcessInfo **head, ProcessInfo *node);
+int remove_process(ProcessInfo **head, pid_t pid);
+ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid);
+```
+
+### 4-4. 시스템 정보 갱신
+
+```c
+int refresh_all_processes(ProcessInfo **head);
+int update_process_stats(ProcessInfo *proc);
+```
+
+---
+
+## 5. 시스템 콜 인터페이스 `[공통]`
+
+| 시스템 콜/함수 | 호출 위치 | 목적 | 실패 처리 |
+|----------------|-----------|------|-----------|
+| `fork()` | 외부 명령 실행 | 자식 생성 | `perror("fork")`, 루프 복귀 |
+| `execvp()` | 자식 프로세스 | 프로그램 교체 | `perror(argv[0])`, `exit(1)` |
+| `waitpid()` | 포그라운드 대기/백그라운드 폴링 | 종료 회수 | `perror("waitpid")` |
+| `chdir()` | `cd` | 디렉토리 변경 | `perror("cd")` |
+| `getcwd()` | `pwd` | 현재 경로 획득 | `perror("pwd")` |
+| `malloc()` | 리스트/버퍼 할당 | 동적 메모리 | `perror("malloc")` |
+| `free()` | 종료/작업 제거 | 메모리 반환 | 이중 해제 금지 |
+| `fopen()`/`fclose()` | 히스토리 | 파일 I/O | `perror("history")` |
+
+---
+
+## 6. 파일 인터페이스 `[공통]`
+
+### 6-1. 시스템 파일
+
+| 경로 | 접근 | 제공 데이터 | 비고 |
+|------|------|-------------|------|
+| `/proc/[pid]/stat` | 읽기 | CPU 시간, 상태 | Linux 전용 |
+| `/proc/[pid]/status` | 읽기 | 메모리 정보 | Linux 전용 |
+
+### 6-2. 프로젝트 파일
+
+| 경로 | 접근 | 목적 |
+|------|------|------|
+| `.tuk_history` | 읽기/쓰기 | 명령어 히스토리 저장 |
+| campus data `.txt` / `.json` | 읽기 | 커스텀 명령 출력 데이터 |
+
+### 6-3. 파일 실패 시 정책
+
+- `.tuk_history` 실패: 히스토리만 비활성화
+- 캠퍼스 데이터 파일 실패: 해당 명령어만 실패 처리
+- `/proc` 파싱 실패: 해당 프로세스의 통계값만 갱신 생략
+
+---
+
+## 7. 호스트 쉘 호환성 기준 `[공통]`
+
+`plan.md`의 팀원 역할 정의에 따라 TUK-Shell은 아래 환경에서 동일한 명령 인터페이스를 유지해야 한다.
+
+| 호스트 환경 | 보장 범위 |
+|-------------|-----------|
+| Bash | 기본 REPL, 내장 명령, 외부 명령, 히스토리 |
+| Zsh | 캠퍼스 커스텀 명령 연동, 구조체/출력 포맷 호환 |
+| PowerShell + WSL | `/proc` 연동, `fork/exec`, 백그라운드 상태 갱신 |
+
+- 호스트 쉘은 TUK-Shell의 부모 실행 환경일 뿐, TUK-Shell 내부 명령 형식은 동일해야 한다.
+- Linux/POSIX 호출은 WSL(Ubuntu) 기준으로 검증한다.
+
+# 03. TUK-Shell 파이프라인명세서
+
+> **기준 문서**: `docs/plan.md`
+> **담당자**: 이우진 (BASH 파트)
+> **목적**: 실행 흐름, 상태 전이, 자원 회수 시점을 단계별로 정의
+
+본 문서는 TUK-Shell의 시작부터 종료까지의 파이프라인을 정의하며, `plan.md`의 개발 순서가 실제 실행 흐름으로 어떻게 반영되는지 설명한다.
+
+---
+
+## 1. 전체 파이프라인 개요
+
+```text
+프로그램 시작
+  -> 초기화
+  -> REPL 입력 대기
+  -> 파싱
+  -> 내장/외부 명령 분기
+  -> 포그라운드 대기 또는 백그라운드 등록
+  -> 상태 갱신 및 자원 회수
+  -> REPL 복귀
+  -> 종료 정리
+```
+
+---
+
+## 2. 초기화 파이프라인 
+
+### 2-1. 순서
+
+```text
+[실행] ./tuk_shell
+    |
+    +-> [1] 런타임 상태 구조체 초기화
+    |
+    +-> [2] ProcessInfo 리스트 헤드 = NULL
+    |
+    +-> [3] .tuk_history 열기 및 기존 이력 로드
+    |       `-> 없으면 생성, 실패하면 히스토리 비활성화
+    |
+    `-> [4] 프롬프트 루프 진입
+```
+
+### 2-2. 초기화 실패 정책
+
+- 히스토리 파일 실패: 경고 후 계속 진행
+- 메모리 할당 실패: 현재 단계가 필수 초기화라면 `exit(1)`
+- 색상 설정 실패 개념은 없으며 ANSI 문자열 출력만 수행
+
+---
+
+## 3. REPL 입력 파이프라인
+
+### 3-1. 상세 흐름
+
+```text
+[프롬프트 출력]
+    |
+    +-> [1] TU BLUE 색상으로 "TUK-OS > " 출력
+    |
+    +-> [2] 한 줄 입력 수신
+    |       `-> EOF면 종료 파이프라인으로 이동
+    |
+    +-> [3] 빈 줄 여부 검사
+    |       `-> 빈 줄이면 다음 반복
+    |
+    +-> [4] 원본 문자열 보관
+    |
+    +-> [5] 토큰화
+    |
+    +-> [6] 마지막 토큰 '&' 검사
+    |       `-> 발견 시 background_flag = 1, 토큰 제거
+    |
+    `-> [7] 히스토리 파일/메모리 버퍼 동기화
+```
+
+### 3-2. 입력 예외 처리
+
+- 입력 길이 초과: 남은 버퍼를 비우고 오류 출력
+- 토큰 수 초과: 실행하지 않고 오류 출력
+- 공백만 있는 줄: 무시
+
+---
+
+## 4. 명령 실행 파이프라인
+
+### 4-1. 분기 로직
+
+```text
+[argv[0] 기준 분기]
+    |
+    +-> [A] 내장 명령어
+    |       +-> 인자/옵션 검증
+    |       +-> 대응 함수 호출
+    |       `-> REPL 복귀
+    |
+    `-> [B] 외부 명령어
+            +-> fork()
+            +-> 자식: execvp()
+            `-> 부모: foreground/background 분기
+```
+
+### 4-2. 내장 명령 처리 규칙
+
+- `cd`, `pwd`, `help`, `exit`, `jobs`, `top`, 캠퍼스 명령어는 쉘 프로세스 내부에서 직접 실행한다.
+- 백그라운드 플래그가 설정된 내장 명령은 금지 목록 여부를 확인한다.
+- 사용법 오류는 프로세스를 생성하지 않고 즉시 반환한다.
+
+### 4-3. 외부 명령 처리 규칙
+
+#### 포그라운드
+
+```text
+부모 -> waitpid(pid, &status, 0)
+     -> 자식 종료 코드 수집
+     -> REPL 복귀
+```
+
+#### 백그라운드
+
+```text
+부모 -> ProcessInfo 생성
+     -> 리스트 등록
+     -> PID 및 시작 메시지 출력
+     -> REPL 즉시 복귀
+```
+
+### 4-4. 시작 메시지 형식
+
+```text
+[bg] pid=12345 command="sleep 30"
+```
+
+출력 색상은 TU SKY BLUE를 사용한다.
+
+---
+
+## 5. 백그라운드 상태 갱신 파이프라인 `[공통]`
+
+### 5-1. 갱신 트리거
+
+- REPL 한 사이클 시작 직전
+- `jobs` 실행 직전
+- `top` 실행 직전
+
+### 5-2. 순서
+
+```text
+[리스트 순회]
+    |
+    +-> [1] waitpid(pid, &status, WNOHANG) 로 종료 여부 확인
+    |
+    +-> [2] 종료되지 않았으면 update_process_stats(proc) 호출
+    |
+    +-> [3] 상태/CPU/메모리 값 갱신
+    |
+    `-> [4] 종료가 확인되면 종료 메시지 출력 후 노드 제거/free
+```
+
+### 5-3. 종료 메시지 형식
+
+```text
+[done] pid=12345 exit=0 command="sleep 30"
+```
+
+### 5-4. 상태 전이
+
+| 이전 상태 | 이벤트 | 다음 상태 |
+|-----------|--------|-----------|
+| `RUNNING` | 정상 종료 감지 | `DONE` |
+| `RUNNING` | 정지 상태 감지 | `STOPPED` |
+| `STOPPED` | 재개 감지 | `RUNNING` |
+| `DONE` | 정리 완료 | 리스트 제거 |
+
+---
+
+## 6. `jobs` / `top` 전용 조회 파이프라인 
+
+### 6-1. `jobs`
+
+```text
+jobs 호출
+  -> 백그라운드 상태 갱신
+  -> 옵션 해석
+  -> 필터 조건 적용
+  -> 표 출력
+```
+
+### 6-2. `top`
+
+```text
+top 호출
+  -> 백그라운드 상태 갱신
+  -> 리스트를 배열로 복사
+  -> qsort(compare_fn)
+  -> 정렬 결과 표 출력
+  -> 임시 배열 해제
+```
+
+---
+
+## 7. 히스토리 파이프라인
+
+### 7-1. 쓰기
+
+```text
+명령 확정
+  -> 빈 명령인지 확인
+  -> .tuk_history에 append
+  -> fflush()
+  -> 메모리 버퍼에 추가
+```
+
+### 7-2. 읽기
+
+```text
+프로그램 시작
+  -> .tuk_history open
+  -> 한 줄씩 메모리 버퍼 적재
+```
+
+### 7-3. 장애 시 동작
+
+- 파일 쓰기 실패: 현재 명령 실행은 계속한다.
+- 메모리 버퍼 추가 실패: 파일 저장만 유지하고 탐색 기능은 제한 가능하다.
+
+---
+
+## 8. 캠퍼스 명령어 파이프라인 
+
+```text
+campus command 입력
+  -> 명령어 식별
+  -> 옵션 검증
+  -> 전용 핸들러 호출
+  -> 더미 데이터 파일 또는 내부 데이터 로드
+  -> TU MINT 색상으로 결과 출력
+  -> REPL 복귀
+```
+
+- BASH 파트는 파서와 핸들러 디스패치까지만 책임진다.
+- 데이터 소스 파싱 실패는 해당 명령만 실패시키고 쉘은 계속 유지한다.
+
+---
+
+## 9. 종료 파이프라인 
+
+```text
+exit 명령 또는 EOF
+    |
+    +-> [1] 남은 백그라운드 프로세스 리스트 순회
+    |       `-> 각 노드 free()
+    |
+    +-> [2] 히스토리 파일 flush/close
+    |
+    `-> [3] 종료 코드 반환
+```
+
+### 9-1. 종료 시 주의사항
+
+- 종료 시 백그라운드 자식을 강제 종료할지 여부는 현재 문서 범위 밖이다.
+- 최소 요구사항은 쉘 내부 메모리 정리와 파일 스트림 종료다.
+- 해제 순서는 리스트 노드 -> 히스토리 -> 기타 버퍼 순으로 유지한다.
+
+---
+
+## 10. 에러 처리 원칙 `[공통]`
+
+| 위치 | 에러 | 처리 |
+|------|------|------|
+| 파싱 | 잘못된 옵션/인자 | 사용법 출력 후 루프 복귀 |
+| `fork()` | 자식 생성 실패 | 오류 출력 후 루프 복귀 |
+| `execvp()` | 외부 명령 실행 실패 | 자식에서 오류 출력 후 `exit(1)` |
+| `waitpid()` | 회수 실패 | 오류 출력 후 해당 루프 계속 |
+| `malloc()` | 메모리 할당 실패 | 현재 작업 중단, 필요 시 종료 |
+| 히스토리 파일 | 열기/쓰기 실패 | 히스토리만 비활성화 |
+| `/proc` 파싱 | 파일 접근 실패 | 통계 갱신 생략 |
+
+# 05. TUK-Shell 개발철칙명세서
+
+> **대상**: TUK-Shell 프로젝트 (특히 Bash 파트 개발자 이우진)
+> **기준 문서**: `docs/01_상세기능명세서.md` ~ `docs/04_검증및추적명세서.md`
+> **핵심 철칙**: **`main.c`는 진입점 및 흐름 제어만 담당하며, 절대로 100줄을 초과하지 않는다.**
+
+---
+
+## 1. 코드 아키텍처 및 모듈화 철칙
+
+### 1-1. `main.c` 100줄 제한 규칙
+- `main.c`는 쉘의 초기화, REPL 루프 제어, 그리고 종료 처리의 **구조적 흐름**만 제어한다.
+- 실질적인 명령 실행, 문자열 파싱, 프로세스 관리, 시스템 정보 수집, 캠퍼스 명령어 처리 등은 모두 기능별 소스 파일(`*.c`) 및 헤더 파일(`*.h`)로 모듈화하여 분리한다.
+- 가독성과 유지보수성 극대화를 위해 `main.c` 내에 헬퍼 함수를 남용하지 않고 호출부 인터페이스만 남긴다.
+
+### 1-2. 기능별 소스 파일 구성 철칙
+소스 코드는 아래와 같이 철저히 분할 구현되어야 한다.   
+(필요에 따라 이 구조는 변경해도 됨)
+
+```text
+src/bash/
+├── main.c           # REPL 루프 및 메인 제어 흐름 (★ 100줄 이하)
+├── parser.c/h       # 명령어 입력 파싱 및 & 플래그 판별
+├── commands.c/h     # 내장 명령어(cd, pwd, help, exit) 핸들러
+├── process.c/h      # ProcessInfo 구조체 및 연결 리스트 관리, fork/execvp 실행
+├── system_info.c/h  # /proc/stat 및 status 파싱 연동 (동현 파트와 인터페이스 일치)
+├── campus.c/h       # 캠퍼스 특화 커스텀 명령어 연동 (원종우 파트와 인터페이스 일치)
+└── history.c/h      # .tuk_history 파일 입출력 및 탐색 기능
+```
+
+---
+
+## 2. 메모리 및 리소스 관리 철칙
+
+### 2-1. 동적 메모리 (`malloc` / `free`) 철칙
+- **해제 시점 주석 필수**: 동적 할당(`malloc`)이 발생하는 모든 지점에는 대응하는 해제(`free`) 시점을 설명하는 주석을 반드시 명시해야 한다.
+- **백그라운드 회수 시 즉시 해제**: `waitpid(..., WNOHANG)`를 통해 백그라운드 자식 프로세스의 종료가 감지되는 즉시, 해당 노드를 `ProcessInfo` 연결 리스트에서 안전하게 제거하고 메모리를 `free()` 한다.
+- **쉘 종료 시 완전 누수 방지**: 사용자가 `exit` 명령어를 입력하거나 EOF가 감지되었을 때, 연결 리스트에 남아 있는 모든 프로세스 노드와 힙 메모리에 할당된 명령어 버퍼 등을 완전히 `free()` 한 뒤 최종 프로세스를 종료한다.
+
+### 2-2. 파일 스트림 철칙
+- 쉘 시작 시 연 `.tuk_history` 파일 스트림은 쉘 종료 시점(`exit`)에 반드시 `fclose()` 되어 쓰기 버퍼가 디스크에 물리적으로 기록(`fflush` 포함)되도록 보장한다.
+
+---
+
+## 3. 에러 처리 및 예외 상황 대응 철칙
+
+### 3-1. 시스템 콜 리턴값 검증 철칙
+- `fork()`, `execvp()`, `waitpid()`, `chdir()`, `getcwd()`, `malloc()`, `fopen()` 등 모든 POSIX 시스템 콜 및 표준 라이브러리 함수의 반환값을 절대 무시하지 않고 검증한다.
+- 호출 실패 시 반드시 `perror("상황 설명")`를 호출하여 표준 에러 출력에 시스템 에러 메시지를 명확히 출력한다.
+
+### 3-2. 예외 복구 및 동작 격리
+- **히스토리 장애 격리**: `.tuk_history` 파일 접근에 실패하더라도 경고 메시지만 출력할 뿐, 쉘의 메인 REPL 루프가 종료되어서는 안 된다.
+- **자식 프로세스 에러 전파 차단**: `fork()` 후 자식 프로세스 내에서 `execvp()` 실행이 실패했을 때, 에러 내용을 `perror`로 출력하고 **반드시 `exit(1)`로 즉시 자식 프로세스를 종료**시켜 부모 프로세스(TUK-Shell)가 자식의 에러를 정상 감지하고 자원을 회수할 수 있도록 한다. (자식 프로세스 내부에서 쉘 메모리 free를 시도하지 않는다.)
+- **캠퍼스 데이터 장애 격리**: 커스텀 캠퍼스 명령어(`bob`, `bus` 등)의 더미 데이터 로드나 파싱에 실패하더라도, 해당 명령 오류만 출력하고 쉘 실행 상태를 정상 유지한다.
+
+---
+
+## 4. 인터페이스 및 사용자 경험(UI/UX) 철칙
+
+### 4-1. 색상 테마 및 포맷 준수
+- 프롬프트는 무조건 `TUK-OS > ` 형식을 취하며, 색상은 **TU BLUE (`#1758A8`)**를 적용한다.
+- 백그라운드 등록 및 종료 알림 등 시스템 메시지 출력은 **TU SKY BLUE (`#068FD3`)**를 사용한다.
+- 캠퍼스 특화 명령어의 출력 결과는 **TU MINT (`#01B3CD`)**를 사용하여 일관된 사용자 경험을 보장한다.
+- 색상 지원이 안 되는 환경(단색 터미널)에서도 텍스트만으로 정상 식별이 가능하도록 괄호(`[]`) 및 텍스트 상태 표기(예: `[bg]`, `[done]`)를 생략하지 않는다.
+
+### 4-2. 입력 제약 조건 관리
+- 사용자의 한 줄 입력 최대 길이는 `MAX_INPUT_LENGTH` 상수를 초과할 수 없으며, 인자 개수는 `MAX_ARGS`로 고정 제약한다.
+- 버퍼가 넘치거나 토큰 개수가 규격을 초과하는 경우 에러 메시지를 출력하고 실행을 즉시 취소한다.
+
+---
+
+### 5-2. 검증 절차 의무화
+- 신규 기능을 추가하거나 수정한 후에는 `docs/04_검증및추적명세서.md`에 명시된 **최소 테스트 시나리오 T01 ~ T10**을 차례대로 수행하여 기능이 기존 규격과 호환되는지 매번 수동 또는 자동 테스트로 확인한다.
+
+# 04. TUK-Shell 검증및추적명세서
+
+> **기준 문서**: `docs/plan.md`
+> **목적**: 계획서, 기능 명세, 인터페이스 명세, 파이프라인 명세 사이의 추적성과 검증 기준을 정의
+
+---
+
+## 1. 문서 추가 이유
+
+기존 3개 명세서는 기능 설명은 가능하지만 다음 항목이 부족했다.
+
+- `plan.md`의 1~7단계가 어떤 문서와 테스트로 검증되는지 직접 연결되지 않음
+- 팀원별 책임과 연동 완료 기준이 문서 단위로 흩어져 있음
+- 구현 후 "무엇이 완료되면 단계가 끝나는가"에 대한 판정 기준이 없음
+
+본 문서는 위 세 문제를 보완하기 위해 추가한다.
+
+---
+
+## 2. 계획서 추적 매트릭스
+
+| 계획서 항목 | 요구 내용 | 반영 문서 | 검증 기준 |
+|-------------|-----------|-----------|-----------|
+| 구조체 & 동적 메모리 | `ProcessInfo`, 연결 리스트, `malloc/free` | `01`, `02`, `03` | 백그라운드 등록/제거 시 누수 없이 동작 |
+| 내장 명령어 | `cd`, `pwd`, `exit`, `help`, 외부 명령 실행 | `01`, `02`, `03` | Bash에서 각 명령 정상 동작 |
+| 검색 기능 | `jobs -pid`, `jobs -name` | `01`, `02`, `03` | PID/이름 필터 출력 검증 |
+| 정렬 기능 | `top -cpu/-mem/-time` | `01`, `02`, `03` | 정렬 순서가 기준과 일치 |
+| 파일 입출력 | `/proc`, `.tuk_history` | `01`, `02`, `03` | 재시작 후 히스토리 로드, 통계값 갱신 |
+| 커스텀 명령어 | `schedule`, `bus`, `bob`, `notice`, `map`, `weather`, `contact` | `01`, `02`, `03` | 옵션 파싱 및 핸들러 호출 검증 |
+| 개발 순서 | 1~7단계 점진 구현 | `01`, `03`, `04` | 각 단계 산출물 체크리스트 통과 |
+
+---
+
+## 3. 단계별 완료 기준
+
+### 3-1. 1단계: 기본 REPL 루프
+
+- `TUK-OS > ` 프롬프트가 반복 출력된다.
+- 외부 명령 `ls`, `pwd` 수준의 실행이 가능하다.
+- 포그라운드 명령 실행 후 다시 입력 대기로 복귀한다.
+
+### 3-2. 2단계: 구조체 + 연결 리스트
+
+- `sleep 10 &` 실행 시 작업이 리스트에 등록된다.
+- 등록 시 PID, 명령어, 시작 시각이 저장된다.
+- 종료 확인 후 노드가 제거된다.
+
+### 3-3. 3단계: `jobs` 검색
+
+- `jobs`가 전체 목록을 표 형식으로 출력한다.
+- `jobs -pid PID`가 정확히 1개 또는 0개를 반환한다.
+- `jobs -name KEYWORD`가 부분 문자열 기준으로 동작한다.
+
+### 3-4. 4단계: `top` 정렬
+
+- `top -cpu`, `top -mem`, `top -time`가 서로 다른 기준으로 정렬된다.
+- 정렬은 원본 리스트를 깨뜨리지 않는다.
+
+### 3-5. 5단계: `/proc` 연동
+
+- 실행 중 프로세스의 CPU/메모리 값이 갱신된다.
+- `/proc` 접근 실패가 쉘 전체 종료로 이어지지 않는다.
+
+### 3-6. 6단계: 히스토리 파일 입출력
+
+- 명령 실행 후 `.tuk_history`에 기록된다.
+- 쉘 재시작 시 이전 기록이 로드된다.
+
+### 3-7. 7단계: 캠퍼스 특화 명령어
+
+- 각 명령어의 옵션 검증이 동작한다.
+- 더미 데이터 기반 출력 또는 핸들러 호출까지 연결된다.
+
+---
+
+
+
+---
+
+## 5. 최소 테스트 시나리오
+
+| ID | 시나리오 | 기대 결과 |
+|----|----------|-----------|
+| T01 | `pwd` | 현재 경로 출력 |
+| T02 | `cd ..` 후 `pwd` | 상위 디렉토리로 변경 확인 |
+| T03 | `sleep 3 &` | 백그라운드 등록 메시지 출력 |
+| T04 | `jobs` | 등록된 `sleep` 작업 표시 |
+| T05 | `jobs -pid <pid>` | 해당 작업 1건 조회 |
+| T06 | `jobs -name sleep` | 부분 문자열 검색 성공 |
+| T07 | `top -time` | 실행시간 기준 정렬 출력 |
+| T08 | 쉘 종료 후 재실행 | `.tuk_history` 로드 확인 |
+| T09 | `notice -a -n 3` | 옵션 조합 파싱 성공 |
+| T10 | 잘못된 옵션 입력 | 사용법 또는 오류 메시지 출력 |
+
+---
+
+## 6. 문서 사용 순서
+
+1. `docs/plan.md`로 전체 목표와 단계 확인
+2. `01_상세기능명세서.md`로 기능 요구사항 확인
+3. `02_인터페이스명세서.md`로 함수/CLI/파일 인터페이스 고정
+4. `03_파이프라인명세서.md`로 실행 순서와 자원 회수 시점 확인
+5. `04_검증및추적명세서.md`로 단계 완료 판정 및 테스트 수행
+
+---
+
+## 7. 결론
+
+이 문서를 기준으로 하면 `plan.md`의 요구사항이 기능, 인터페이스, 실행 흐름, 검증 기준으로 분리되어 추적 가능해진다. 구현 전에 팀 간 함수 시그니처와 옵션 규칙을 먼저 확정하고, 이후 단계별로 테스트를 통과시키는 방식으로 진행한다.
+
+# 📊 TUK-Shell 개발 진척 및 검증 현황판
+
+> **문서 목적:** `plan.md`의 요구사항과 `04_검증및추적명세서`의 판정 기준을 통합하여, 단계별 구현 내용과 검증 결과를 한눈에 추적하기 위한 현황판입니다.
+
+## 📍 전체 진행 상황 (Progress)
+
+* [x] **1단계:** 기본 REPL 루프 (프롬프트 출력 → 입력 파싱 → fork/exec 외부 명령 실행)
+* [x] **2단계:** 구조체 정의 + 연결 리스트 기반 백그라운드 작업 관리
+* [x] **3단계:** jobs 검색 기능 추가
+* [x] **4단계:** top 정렬 기능 추가
+* [x] **5단계:** /proc 파일 파싱으로 실제 시스템 데이터 연동
+* [x] **6단계:** 히스토리 파일 입출력 추가 **(완료)**
+* [ ] **7단계:** 캠퍼스 특화 커스텀 명령어 추가 (더미 데이터 기반 우선 구현)
+
+---
+
+## 🛠️ 단계별 상세 구현 및 검증 리포트
+
+### ✅ 1단계: 기본 REPL 루프 (완료)
+
+* **주요 내용:** `main.c` 등 모듈화, 프롬프트 컬러(TU BLUE) 적용, 파싱 로직, `cd/pwd/exit/help` 내장 명령어 처리.
+
+### ✅ 2단계: 구조체 + 연결 리스트 (완료)
+
+* **주요 내용:** `ProcessInfo` 구조체 정의, 동적 연결 리스트 관리, `waitpid(-1, &status, WNOHANG)`를 이용한 메모리 누수 방지 및 프로세스 상태 갱신(Reaping) 구현 완료.
+
+### ✅ 3단계: `jobs` 검색 (완료)
+
+* **주요 내용:** 연결 리스트 순회 출력, PID 정확 검색, Name 부분 문자열(`strstr`) 검색 로직 구현 및 예외 처리 완비.
+
+### ✅ 4단계: `top` 정렬 (완료)
+
+* **주요 내용:** 원본 연결 리스트의 훼손을 막기 위한 동적 배열 복사, `qsort`를 활용한 CPU/메모리/시간 내림차순 정렬 콜백 구현 및 누수 방지(`free`) 완료.
+
+### ✅ 6단계: 히스토리 파일 입출력 (완료)
+
+**1. 구현 내용 요약**
+
+* **히스토리 누적 및 로드:** 쉘 종료 시 입력된 명령어를 `.tuk_history` 파일에 저장하고, 시작 시 기존 히스토리를 로드하여 누적 보존.
+* **저장 데이터 최적화:** 단순 엔터(빈 줄) 및 공백/탭 등 의미 없는 입력은 기록하지 않도록 필터링 처리.
+* **사용자 입력 보존:** 문법 오류(예: 리다이렉션 미지원)로 실행이 거부된 명령어도 사용자의 입력 맥락 보존을 위해 히스토리에 정상 기록.
+* **장애 허용성(Fault Tolerance):** `.tuk_history` 파일 접근 실패 시 에러 로그만 출력하고 쉘의 핵심 REPL 루프에는 영향을 주지 않도록 시스템 격리 완료.
+
+**2. 단계 검증 (5대 추가 테스트 Pass 완료)**
+
+* [x] **기본 저장 및 재시작 로드 (T08 핵심):** 쉘 종료 후 재시작 시 기존 명령어 라인들이 누적되어 저장됨을 파일 출력으로 확인.
+* [x] **빈 줄 필터링:** 스페이스나 빈 엔터 입력 시 히스토리에 쓰레기 값이 추가되지 않음.
+* [x] **실패 명령 기록:** 실행이 거부된 명령어(`echo hi > out.txt`)도 파일에 정상 기록됨.
+* [x] **장애 허용성 검증:** 파일명 위치에 디렉토리를 생성하여 파일 오픈 에러를 강제 유도해도 쉘이 죽지 않고 나머지 명령이 정상 작동함.
+* [x] **기존 기능 회귀 검증:** 백그라운드 등록, `jobs`, `top`, 문법 예외 처리 등 1~5단계 핵심 기능 간 간섭 없음 확인.
+
+---
+
+## 🚨 5단계 진입 전 통합 QA: 트러블슈팅 및 버그 픽스 리포트
+
+5단계 본 구현에 앞서, 1~4단계 통합 검증 과정에서 발생한 예외 상황과 해결 내역입니다.
+
+**1. 리다이렉션 미지원 처리 누락 (버그 수정 완료)**
+
+* **증상:** `yes > /dev/null &` 입력 시 터미널 화면이 `>` 문자로 무한 도배되며 쉘 통제 불능 상태에 빠짐 (Ctrl+C 강제 종료 필요).
+* **해결 방안:** `parser.c`에 `has_unsupported_syntax()` 검증 로직 추가. 파싱된 토큰 중 `>`, `<`, `|`, `"` 등이 포함될 경우 명시적 에러 메시지를 출력하고 즉시 실행을 거부하도록 안전장치 구현. (Valgrind 누수 검증 완벽 통과)
+
+**2. UI 텍스트 겹침 현상 (정상 동작 분석 완료)**
+
+* **분석 결과:** 파싱 버그가 아님. 백그라운드 프로세스 완료(`[done]`) 메시지가 비동기로 출력되는 타이밍과 사용자의 키보드 입력 시점이 겹치면서 화면상에서만 텍스트가 섞여 보이는 쉘 고유의 아티팩트(Artifact) 현상.
+
+**3. 백그라운드 완료 알림 지연 현상 (정상 동작 분석 완료)**
+
+* **분석 결과:** 버그가 아님. "REPL 한 사이클 시작 직전에 상태 갱신을 수행한다"는 초기 아키텍처 설계가 정확히 동작하고 있는 정상적인 흐름으로 판정.
+
+---
+
+### ⏳ ✅ 5단계: `/proc` 연동 (완료)
+
+* **목표:** 리눅스 가상 파일 시스템을 통한 실제 시스템 리소스 추적 (Windows/Ubuntu 팀원 전담 파트).
+
+### ⏳ 7단계: 캠퍼스 특화 명령어 (진행 대기)
+
+* **목표:** `schedule`, `bus`, `bob`, `notice` 등 교내 편의 기능 탑재.
+
+---
+
+## 🧪 최소 테스트 시나리오 (통합 QA 기준)
+
+기능 구현 시 수시로 아래 시나리오를 점검합니다.
+
+| ID | 시나리오 | 기대 결과 | 현재 상태 |
+| --- | --- | --- | --- |
+| **T01** | `pwd` | 현재 경로 출력 | ✅ Pass |
+| **T02** | `cd ..` 후 `pwd` | 상위 디렉토리로 변경 확인 | ✅ Pass |
+| **T03** | `sleep 3 &` | 백그라운드 등록 메시지 출력 | ✅ Pass |
+| **T04** | `jobs` | 등록된 `sleep` 작업 표시 | ✅ Pass |
+| **T05** | `jobs -pid <pid>` | 해당 작업 1건 조회 | ✅ Pass |
+| **T06** | `jobs -name sleep` | 부분 문자열 검색 성공 | ✅ Pass |
+| **T07** | `top -time` | 실행시간 기준 정렬 출력 | ✅ Pass |
+| **T08** | 쉘 종료 후 재실행 | `.tuk_history` 로드 확인 | ✅ Pass |
+| **T09** | `notice -a -n 3` | 옵션 조합 파싱 성공 | ⏳ (7단계) |
+| **T10** | 잘못된 옵션 입력 | 사용법 또는 오류 메시지 출력 | ✅ Pass |
+| **T11** | `yes > /dev/null &` | 미지원 문법(`>`, `<`, ` | ✅ Pass |
+
+
+이제 마지막 7단계를 진행해줘.
+현재 프로젝트 구조는
+/data
+    /campus
+        bob.txt
+        bus.txt
+        ...
+
+src/
+    zsh/
+        /build
+            .o file
+        /include
+            .h file
+        /src
+            .c file
+
+이렇게 되어있어
+생성된 전체 코드 를 zip 파일로 묶어서 제공해줘

@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include "executor.h"
 #include "commands.h"
+#include "campus.h"
 #include "process.h"
 #include "tuk_shell.h"
 
@@ -82,6 +83,19 @@ int execute_command(int argc, char **argv, int background_flag, const char *raw_
             return 1;
         }
         return execute_builtin(argc, argv, should_exit, job_list);
+    }
+
+    /*
+     * 캠퍼스 특화 명령어 (7단계) - 03문서 4-2에 따라 쉘 프로세스 내부에서 직접
+     * 실행되므로 내장 명령어와 동일하게 백그라운드 조합을 금지한다.
+     * 데이터 로드 실패(-1)는 해당 명령만 실패시키고 쉘은 계속 유지한다 (03문서 8장).
+     */
+    if (is_campus_command(argv[0])) {
+        if (background_flag) {
+            fprintf(stderr, "built-in command cannot run in background\n");
+            return 1;
+        }
+        return dispatch_campus_command(argc, argv);
     }
 
     return execute_external(argv, background_flag, raw_command, job_list);

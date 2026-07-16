@@ -1,5 +1,8 @@
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "tuk_shell.h"
 #include "parser.h"
 #include "executor.h"
@@ -19,6 +22,22 @@ int main(void)
     size_t len;
     ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
     HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
+
+    /* 데이터 파일 절대 경로 고정 (실행 직후 CWD 기준) */
+    if (getenv("TUK_CAMPUS_DATA") == NULL) {
+        const char *bases[] = { "data/campus", "../data/campus", "../../data/campus", "../../../data/campus" };
+        char abs_path[PATH_MAX];
+        for (int i = 0; i < 4; i++) {
+            char probe[PATH_MAX];
+            snprintf(probe, sizeof(probe), "%s/bus.txt", bases[i]);
+            if (access(probe, R_OK) == 0) {
+                if (realpath(bases[i], abs_path) != NULL) {
+                    setenv("TUK_CAMPUS_DATA", abs_path, 1);
+                    break;
+                }
+            }
+        }
+    }
 
     /* 가상 OS 부팅 시퀀스 및 로고 출력 */
     print_welcome_screen();

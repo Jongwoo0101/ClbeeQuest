@@ -9,3 +9,5 @@ src/bash/tuk_shell
 src/bash/build/
 /tuk_shell
 src/bash/.tuk_history
+.DS_Store
+**/ .DS_Store

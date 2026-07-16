@@ -1,0 +1,2506 @@
+#ifndef CAMPUS_H
+#define CAMPUS_H
+
+/*
+ * campus.h - 캠퍼스 특화 커스텀 명령어
+ *
+ * 근거 문서:
+ *  - 01_상세기능명세서.md 9장 (책임 범위, 옵션 파싱 규칙, 핸들러 인터페이스)
+ *  - 02_인터페이스명세서.md 3-3 (명령어별 사용 형식/인자 규칙), 6-2 (데이터 파일)
+ *  - 03_파이프라인명세서.md 8장 (캠퍼스 명령어 파이프라인)
+ *
+ * 핸들러 반환 규약 (01문서 9-4):
+ *  - 성공 0 / 사용법 오류 1 / 데이터 로드 실패 -1
+ *  - 출력 색상은 TU MINT (#01B3CD) 기본
+ *
+ * 데이터 소스: plan.md 3-[6] "로컬 텍스트/JSON 파일을 파싱해서 출력"에 따라
+ * data/campus/ 아래의 '|' 구분 텍스트 파일을 파싱한다. 추후 API 연동으로
+ * 교체할 수 있도록 파일 접근은 campus.c 내부 static 함수로 캡슐화하고,
+ * 아래 핸들러 인터페이스는 고정한다.
+ */
+
+/*
+ * is_campus_command
+ *  - cmd가 캠퍼스 명령어 이름이면 1, 아니면 0.
+ *  - schedule/bus/bob/notice/map/weather/contact 인식.
+ *  - is_builtin()과 별도로 두어 내장 명령어 목록(01문서 5-3 백그라운드 금지 목록)과
+ *    캠퍼스 명령어 목록을 구분해서 관리한다.
+ */
+int is_campus_command(const char *cmd);
+
+/*
+ * dispatch_campus_command
+ *  - argv[0]에 해당하는 캠퍼스 명령의 옵션을 검증한 뒤 핸들러를 호출한다.
+ *    호출 전 is_campus_command() 확인 전제.
+ *  - 반환값: 0 정상, 1 사용법/옵션 오류, -1 데이터 로드 실패
+ */
+int dispatch_campus_command(int argc, char **argv);
+
+/* 01문서 9-4 핸들러 인터페이스 (시그니처 고정) */
+int handle_schedule_command(int argc, char **argv);
+int handle_bus_command(int argc, char **argv);
+int handle_bob_command(int argc, char **argv);
+int handle_notice_command(int argc, char **argv);
+int handle_map_command(int argc, char **argv);
+int handle_weather_command(int argc, char **argv);
+int handle_contact_command(int argc, char **argv);
+
+#endif /* CAMPUS_H */
+
+#ifndef COMMANDS_H
+#define COMMANDS_H
+
+#include "process.h"
+
+/* 개별 핸들러: 성공 0, 사용법 오류 1 (02_인터페이스명세서.md 4-2) */
+int handle_cd(int argc, char **argv);
+int handle_pwd(int argc, char **argv);
+int handle_help(int argc, char **argv);
+int handle_exit(int argc, char **argv);
+
+/*
+ * handle_jobs
+ *  - jobs / jobs -pid [PID] / jobs -name [KEYWORD] 처리 (01_상세기능명세서.md 6장).
+ *  - job_list: 백그라운드 작업 리스트의 헤드 포인터 주소. 호출 시 먼저
+ *    refresh_all_processes()로 상태를 갱신한 뒤 조회한다 (03_파이프라인명세서.md 6-1).
+ *  - 반환값: 0 정상(검색 결과 없음도 정상 0), 1 사용법/옵션 오류
+ */
+int handle_jobs(int argc, char **argv, ProcessInfo **job_list);
+
+/*
+ * handle_top
+ *  - top -cpu / top -mem / top -time 처리 (01_상세기능명세서.md 7장).
+ *  - 원본 연결 리스트는 훼손하지 않고, 출력용 배열로 복사한 뒤 qsort()로 정렬한다
+ *    (01문서 7-3, 03_파이프라인명세서.md 6-2).
+ *  - 반환값: 0 정상(활성 작업 0개도 정상), 1 사용법/옵션 오류, -1 치명적 오류(malloc 실패)
+ */
+int handle_top(int argc, char **argv, ProcessInfo **job_list);
+
+/*
+ * is_builtin
+ *  - cmd가 내장 명령어 이름이면 1, 아니면 0.
+ *  - 현재 cd/pwd/help/exit/jobs/top 인식 (4단계 기준).
+ */
+int is_builtin(const char *cmd);
+
+/*
+ * execute_builtin
+ *  - argv[0]에 해당하는 내장 명령어 핸들러를 호출한다. 호출 전 is_builtin() 확인 전제.
+ *  - should_exit : exit 명령이 정상 처리되면 1로 설정 (main 루프 종료 신호).
+ *  - job_list    : jobs 명령이 리스트 조회를 위해 필요로 함.
+ *  - 반환값: 0 정상, 1 사용법 오류, -1 치명적 오류
+ */
+int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_list);
+
+#endif /* COMMANDS_H */
+
+#ifndef EXECUTOR_H
+#define EXECUTOR_H
+
+#include "process.h"
+
+/*
+ * execute_command
+ *  - parse_command로 얻은 argc/argv/background_flag를 받아
+ *    내장/외부 명령을 분기 실행한다 (03_파이프라인명세서.md 4-1).
+ *  - raw_command  : 사용자가 입력한 원본 명령 문자열(& 제거 전). 백그라운드 등록 시
+ *                   ProcessInfo->command 필드 채우는 용도로 사용된다.
+ *  - should_exit  : exit 명령이 실행되면 1로 설정.
+ *  - job_list     : 백그라운드 작업 연결 리스트의 헤드 포인터 주소. 백그라운드 실행 시
+ *                   create_process_node() + append_process()로 등록된다.
+ *
+ * 반환값: 0 정상, 1 사용법(또는 백그라운드 금지) 오류, -1 치명적 오류
+ */
+int execute_command(int argc, char **argv, int background_flag, const char *raw_command,
+                     int *should_exit, ProcessInfo **job_list);
+
+#endif /* EXECUTOR_H */
+
+#ifndef HISTORY_H
+#define HISTORY_H
+
+#include <stdio.h>
+
+#define HISTORY_FILE_NAME ".tuk_history"
+
+/*
+ * HistoryContext
+ *  - entries : malloc/realloc로 관리되는 문자열 포인터 배열 (세션 내 히스토리 메모리 버퍼)
+ *  - count   : 현재 저장된 항목 수
+ *  - capacity: entries 배열의 할당 크기
+ *  - fp      : .tuk_history 파일 스트림. 열기 실패 시 NULL.
+ *  - enabled : 파일 열기에 성공했을 때만 1. 실패하면 0 (히스토리 기능 전체 비활성화).
+ */
+typedef struct {
+    char **entries;
+    int count;
+    int capacity;
+    FILE *fp;
+    int enabled;
+} HistoryContext;
+
+/*
+ * history_init
+ *  - 현재 디렉토리의 .tuk_history 파일을 "a+" 모드로 연다(없으면 생성).
+ *  - 파일이 이미 존재하면 전체 내용을 한 줄씩 읽어 메모리 버퍼(ctx->entries)에 로드한다
+ *    (01문서 8-2, 03문서 7-2).
+ *  - 파일 열기 실패 시: perror("history") 출력 후 ctx->enabled=0으로 남기고 반환한다.
+ *    이 실패가 쉘 전체 종료로 이어지지 않는다 (01문서 8-3, 05문서 3-2).
+ */
+void history_init(HistoryContext *ctx);
+
+/*
+ * history_add
+ *  - line이 빈 문자열이면 아무 것도 하지 않는다 (01문서 8-1 "빈 줄은 저장하지 않는다").
+ *  - 히스토리가 비활성화 상태(ctx->enabled==0)면 아무 것도 하지 않는다.
+ *  - 파일에 append 후 fflush(), 그리고 메모리 버퍼에도 추가한다 (03문서 7-1).
+ *  - 파일 쓰기 실패: perror 출력 후에도 현재 명령 실행 자체는 계속 진행되어야 하므로
+ *    이 함수는 실패해도 쉘을 중단시키지 않는다 (03문서 7-3).
+ *  - 메모리 버퍼 확장(realloc) 실패 시에도 파일 저장은 이미 끝난 상태이므로 경고만 출력한다
+ *    (03문서 7-3 "메모리 버퍼 추가 실패: 파일 저장만 유지").
+ */
+void history_add(HistoryContext *ctx, const char *line);
+
+/*
+ * history_close
+ *  - 파일 스트림을 fflush 후 fclose (05_개발철칙명세서.md 2-2).
+ *  - 메모리 버퍼에 malloc된 모든 문자열과 배열 자체를 free (05문서 2-1).
+ */
+void history_close(HistoryContext *ctx);
+
+#endif /* HISTORY_H */
+
+#ifndef PARSER_H
+#define PARSER_H
+
+/*
+ * parse_command
+ *  - line : 원본 입력 문자열 (개행이 이미 제거된 상태). 내부에서 strtok으로
+ *           직접 토큰화하므로 line 버퍼가 변형된다.
+ *  - argv : 호출자가 크기 MAX_ARGS+1로 준비한 배열. 토큰 포인터(line 내부를 가리킴)로 채워지고
+ *           마지막에 argv[argc] = NULL 규약을 지킨다.
+ *  - background_flag : 출력 파라미터. 마지막 독립 토큰이 "&"이면 1, 아니면 0으로 설정.
+ *                       "&"가 background_flag에 반영된 뒤에는 argv에서 제거된다.
+ *
+ * 반환값 (01_상세기능명세서.md 4-2, 02_인터페이스명세서.md 4-1):
+ *    0 : 빈 입력(공백만 있는 줄 포함) - 실행하지 않고 다음 루프로
+ *   >0 : 정상 파싱된 토큰 개수(argc)
+ *   -1 : 파싱 오류 (예: MAX_ARGS 초과)
+ */
+int parse_command(char *line, char **argv, int *background_flag);
+
+/*
+ * strip_background_marker
+ *  - background_flag가 1일 때, raw_line 끝의 '&'와 그 앞 공백을 제거한다.
+ *  - 03_파이프라인명세서.md 4-4의 시작 메시지 포맷(command="sleep 30")이 '&'를
+ *    표시하지 않는 것과 ProcessInfo->command 저장 형식을 일치시키기 위한 용도.
+ *  - background_flag가 0이면 아무 동작도 하지 않는다.
+ */
+void strip_background_marker(char *raw_line, int background_flag);
+
+#endif /* PARSER_H */
+
+#ifndef PROCESS_H
+#define PROCESS_H
+
+#include <sys/types.h>
+#include <time.h>
+#include "tuk_shell.h"
+
+#define PROC_NAME_MAX 64
+#define PROC_COMMAND_MAX MAX_INPUT_LENGTH
+
+/* 01_상세기능명세서.md 3-2 상태값 규칙 */
+typedef enum {
+    PROC_RUNNING, /* 백그라운드 실행 중, waitpid(WNOHANG) 미종료 */
+    PROC_STOPPED, /* 시그널 등으로 일시 정지 */
+    PROC_DONE     /* 종료 확인, 정리 직전 */
+} ProcessStatus;
+
+/* 01_상세기능명세서.md 3-1 필드 명세 */
+typedef struct ProcessInfo {
+    pid_t pid;
+    char name[PROC_NAME_MAX];
+    char command[PROC_COMMAND_MAX];
+    time_t start_time;
+    double cpu_usage;
+    long mem_usage_kb;
+    ProcessStatus status;
+    int exit_code; /* 실행 중이면 -1 */
+    struct ProcessInfo *next;
+} ProcessInfo;
+
+/*
+ * create_process_node
+ *  - malloc(sizeof(ProcessInfo))로 노드 생성.
+ *  - 실패 시 NULL 반환하고 호출부는 리스트에 넣지 않는다 (01문서 3-3).
+ */
+ProcessInfo *create_process_node(pid_t pid, char **argv, const char *raw_command);
+
+/* 리스트 끝에 노드 추가. 성공 0, 실패 -1 */
+int append_process(ProcessInfo **head, ProcessInfo *node);
+
+/*
+ * remove_process
+ *  - pid에 해당하는 노드를 리스트에서 분리한 뒤 즉시 free() (01문서 3-3, 05문서 2-1).
+ *  - 성공 0, 대상 없음 -1.
+ */
+int remove_process(ProcessInfo **head, pid_t pid);
+
+/* pid로 노드 검색 (리스트 순회, 노드 소유권은 그대로 리스트에 있음) */
+ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid);
+
+/*
+ * refresh_all_processes
+ *  - 03_파이프라인명세서.md 5장 순서를 그대로 구현:
+ *    waitpid(WNOHANG) 종료 확인 -> 미종료면 update_process_stats() 갱신
+ *    -> 종료 확인되면 [done] 메시지 출력 후 노드 제거/free.
+ *  - 항상 0을 반환한다(리스트 자체가 없을 때만 -1).
+ */
+int refresh_all_processes(ProcessInfo **head);
+
+/* exit/EOF 시 남은 모든 노드를 순회하며 free (01문서 3-3, 05문서 2-1) */
+void free_process_list(ProcessInfo **head);
+
+/* 상태 enum -> 문자열 (이후 jobs/top 출력에서 재사용) */
+const char *process_status_to_string(ProcessStatus status);
+
+#endif /* PROCESS_H */
+
+#ifndef SYSTEM_INFO_H
+#define SYSTEM_INFO_H
+
+#include "process.h"
+
+/*
+ * update_process_stats
+ *  - /proc/[pid]/stat, /proc/[pid]/status 파싱 기반 CPU/메모리 갱신.
+ *  - 성공 시 0, 실패 시 -1.
+ *  - 실패 시 호출부(refresh_all_processes)는 cpu_usage=0.0, mem_usage_kb=0으로 처리하고
+ *    status는 기존 값을 유지한다.
+ *
+ * [5단계 구현 노트]
+ *  - mem_usage_kb: /proc/[pid]/status의 VmRSS 값을 그대로 사용한다.
+ *  - cpu_usage: /proc/[pid]/stat의 utime+stime(틱)을 sysconf(_SC_CLK_TCK)로 초 단위 변환한 뒤,
+ *    "프로세스 시작 이후 경과 시간(start_time 기준)" 대비 비율(%)로 계산한다.
+ *    즉 top(1)의 순간 CPU%(직전 샘플링 구간 델타)가 아니라 "시작 이후 누적 평균 CPU 점유율"이다.
+ *    순간 사용률을 계산하려면 이전 측정 시점의 utime+stime과 timestamp를 별도로 저장해야 하는데,
+ *    01_상세기능명세서.md 3-1의 ProcessInfo 필드 명세에는 그런 필드가 없어 구조체를 임의로
+ *    늘리지 않기 위해 누적 평균 방식으로 단순화했다(팀 합의 시 델타 방식으로 교체 가능).
+ */
+int update_process_stats(ProcessInfo *proc);
+
+#endif /* SYSTEM_INFO_H */
+
+#ifndef TUK_SHELL_H
+#define TUK_SHELL_H
+
+/* 입력/토큰 제약 (02_인터페이스명세서.md 2-1) */
+#define MAX_INPUT_LENGTH 1024
+#define MAX_ARGS 64
+
+/* TU Color (ANSI True Color) - 05_개발철칙명세서.md 4-1 */
+#define TU_BLUE      "\x1b[38;2;23;88;168m"   /* #1758A8 : 프롬프트/강조 */
+#define TU_SKY_BLUE  "\x1b[38;2;6;143;211m"   /* #068FD3 : 시스템/작업 메시지 */
+#define TU_MINT      "\x1b[38;2;1;179;205m"   /* #01B3CD : 캠퍼스 명령어 결과 */
+#define COLOR_RESET  "\x1b[0m"
+
+#endif /* TUK_SHELL_H */
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "campus.h"
+#include "tuk_shell.h"
+
+/*
+ * 이번 단계(7단계) 구현 범위:
+ *  - 캠퍼스 명령어 7종(schedule/bus/bob/notice/map/weather/contact) 진입점 식별
+ *  - 옵션 파싱 및 사용법/잘못된 옵션 처리 (01문서 9-3: argv 순회 + strcmp)
+ *  - data/campus/ 아래 로컬 텍스트 파일 파싱 후 TU MINT로 결과 출력
+ *
+ * plan.md 3-[6]의 "추후 API 연동 확장이 가능하도록 함수 인터페이스를 분리"에 따라
+ * 파일 접근은 이 파일의 static 함수(open_campus_data 등)로 캡슐화했다. API 연동으로
+ * 교체할 때 campus.h의 handle_*_command 시그니처는 그대로 두고 내부만 바꾸면 된다.
+ *
+ * [메모리] 이 파일은 동적 메모리를 사용하지 않는다. 고정 크기 스택 버퍼에 한 줄씩
+ * 읽어 처리하므로 별도의 free() 지점이 없다(05문서 2-1 대상 아님).
+ */
+
+#define CAMPUS_LINE_MAX 512
+#define CAMPUS_PATH_MAX 512
+#define CAMPUS_MAX_FIELDS 8
+
+/* 데이터 파일 스키마상 최대 필드 수보다 넉넉히 잡은 주간 예보 버퍼 (weather -w/-d) */
+#define WEATHER_MAX_ROWS 400
+#define WEATHER_RECENT_DAYS 7
+
+/* ============================================================
+ * 데이터 파일 접근 (02문서 6-2 campus data .txt)
+ * ============================================================ */
+
+/*
+ * resolve_campus_data_dir
+ *  - TUK_CAMPUS_DATA 환경변수가 있으면 그대로 사용한다(폴백 없음 - 잘못 지정하면
+ *    open_campus_data()가 그대로 실패해 원인 파악이 쉽다).
+ *  - 없으면 실행 위치 기준 후보를 순서대로 탐색한다. src/zsh에서 실행하는 경우
+ *    (../../data/campus)와 저장소 루트에서 실행하는 경우(data/campus)를 모두 포괄한다.
+ */
+static const char *resolve_campus_data_dir(void)
+{
+    static const char *candidates[] = {
+        "data/campus",
+        "../../data/campus",
+        "../../../data/campus"
+    };
+    static char resolved[CAMPUS_PATH_MAX];
+    char probe[CAMPUS_PATH_MAX];
+    FILE *probe_fp;
+    const char *env;
+    size_t i;
+
+    env = getenv("TUK_CAMPUS_DATA");
+    if (env != NULL && env[0] != '\0') {
+        return env;
+    }
+
+    for (i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        snprintf(probe, sizeof(probe), "%s/schedule.txt", candidates[i]);
+        probe_fp = fopen(probe, "r");
+        if (probe_fp != NULL) {
+            fclose(probe_fp);
+            snprintf(resolved, sizeof(resolved), "%s", candidates[i]);
+            return resolved;
+        }
+    }
+
+    /* 후보를 못 찾으면 첫 후보를 돌려줘 open_campus_data()가 파일명을 포함한
+     * 일관된 오류 메시지로 실패하게 한다. */
+    snprintf(resolved, sizeof(resolved), "%s", candidates[0]);
+    return resolved;
+}
+
+/*
+ * open_campus_data
+ *  - 캠퍼스 데이터 파일을 읽기 모드로 연다.
+ *  - 실패 시 오류 출력 후 NULL 반환. 호출부는 -1을 반환해 해당 명령만 실패시키고
+ *    쉘은 계속 유지한다 (02문서 6-3, 05문서 3-2 캠퍼스 데이터 장애 격리).
+ */
+static FILE *open_campus_data(const char *filename)
+{
+    char path[CAMPUS_PATH_MAX];
+    FILE *fp;
+
+    snprintf(path, sizeof(path), "%s/%s", resolve_campus_data_dir(), filename);
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "campus: 데이터 파일을 찾을 수 없습니다 (%s)\n", filename);
+    }
+    return fp;
+}
+
+/*
+ * read_data_line
+ *  - 주석(#)과 빈 줄을 건너뛰며 유효한 한 줄을 읽는다(개행 제거 완료).
+ *  - 반환값: 1 정상 읽음, 0 EOF
+ */
+static int read_data_line(FILE *fp, char *buffer, size_t size)
+{
+    while (fgets(buffer, (int)size, fp) != NULL) {
+        buffer[strcspn(buffer, "\n")] = '\0';
+        if (buffer[0] == '\0' || buffer[0] == '#') {
+            continue;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/*
+ * split_pipe
+ *  - '|' 구분 필드를 line 버퍼 내부에서 분리한다(parse_command의 strtok과 동일하게
+ *    원본 버퍼를 파괴하며, 동적 메모리를 쓰지 않는다).
+ *  - 반환값: 분리된 필드 개수
+ */
+static int split_pipe(char *line, char **fields, int max_fields)
+{
+    int count = 0;
+    char *p = line;
+
+    fields[count++] = p;
+    while (*p != '\0' && count < max_fields) {
+        if (*p == '|') {
+            *p = '\0';
+            fields[count++] = p + 1;
+        }
+        p++;
+    }
+    return count;
+}
+
+/* 쉼표 구분 목록을 sep로 바꿔 출력 (임시 버퍼 없이 문자 단위 처리) */
+static void print_csv_as(const char *csv, const char *sep)
+{
+    const char *p;
+
+    for (p = csv; *p != '\0'; p++) {
+        if (*p == ',') {
+            fputs(sep, stdout);
+        } else {
+            fputc(*p, stdout);
+        }
+    }
+}
+
+/* 쉼표 구분 목록의 항목 수 (bus 운행 횟수 표기용) */
+static int count_csv_items(const char *csv)
+{
+    const char *p;
+    int count;
+
+    if (csv == NULL || csv[0] == '\0') {
+        return 0;
+    }
+    count = 1;
+    for (p = csv; *p != '\0'; p++) {
+        if (*p == ',') {
+            count++;
+        }
+    }
+    return count;
+}
+
+/*
+ * display_width
+ *  - UTF-8 문자열이 터미널에서 차지하는 칸 수를 계산한다.
+ *  - printf("%-16s")는 바이트 수로 폭을 맞추는데 한글은 UTF-8에서 한 글자가 3바이트라
+ *    표가 어긋난다. 그래서 표 출력에는 %-Ns 대신 print_padded()를 쓴다.
+ *  - 3바이트 문자(한글/CJK)를 2칸으로 계산한다. 본 프로젝트 데이터는 한글+ASCII만
+ *    쓰므로 이 근사로 충분하다(엄밀한 폭 계산은 wcwidth 필요).
+ */
+static int display_width(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    int width = 0;
+
+    while (*p != '\0') {
+        if (*p < 0x80) {                 /* ASCII */
+            width += 1;
+            p += 1;
+        } else if ((*p & 0xE0) == 0xC0) { /* 2바이트 */
+            width += 1;
+            p += 2;
+        } else if ((*p & 0xF0) == 0xE0) { /* 3바이트: 한글/CJK */
+            width += 2;
+            p += 3;
+        } else {                          /* 4바이트: 이모지 등 */
+            width += 2;
+            p += 4;
+        }
+    }
+    return width;
+}
+
+/* 문자열을 출력하고 표시 폭 기준으로 width 칸까지 공백을 채운다 */
+static void print_padded(const char *s, int width)
+{
+    int w = display_width(s);
+
+    fputs(s, stdout);
+    while (w < width) {
+        fputc(' ', stdout);
+        w++;
+    }
+}
+
+/* argv[i]가 순수 숫자인지 검사 - "notice -n abc" 방어 (01문서 9-3) */
+static int is_all_digits(const char *s)
+{
+    if (s == NULL || *s == '\0') {
+        return 0;
+    }
+    for (; *s != '\0'; s++) {
+        if (*s < '0' || *s > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* ============================================================
+ * 명령어 식별 및 옵션 검증 (01문서 9-1, 9-3)
+ * ============================================================ */
+
+static const char *CAMPUS_NAMES[] = {
+    "schedule", "bus", "bob", "notice", "map", "weather", "contact"
+};
+static const int CAMPUS_COUNT = 7;
+
+int is_campus_command(const char *cmd)
+{
+    int i;
+
+    if (cmd == NULL) {
+        return 0;
+    }
+    for (i = 0; i < CAMPUS_COUNT; i++) {
+        if (strcmp(cmd, CAMPUS_NAMES[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * validate_single_option
+ *  - "옵션 1개 필수"(02문서 3-3)인 bus/bob/weather 공용 검증.
+ *  - 반환값: 0 통과, 1 사용법 오류
+ */
+static int validate_single_option(int argc, char **argv, const char **options,
+                                  int option_count, const char *usage)
+{
+    int i;
+
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s\n", usage);
+        return 1;
+    }
+    for (i = 0; i < option_count; i++) {
+        if (strcmp(argv[1], options[i]) == 0) {
+            return 0;
+        }
+    }
+    fprintf(stderr, "usage: %s\n", usage); /* 01문서 9-3: 미정의 옵션 -> 사용법 */
+    return 1;
+}
+
+/* notice [-g|-a|-s] [-n N]: 분류 옵션 최대 1개, -n은 선택이며 값 필수 (02문서 3-3) */
+static int validate_notice(int argc, char **argv)
+{
+    static const char *usage = "notice [-g | -a | -s] [-n N]";
+    int category_count = 0;
+    int count_option = 0;
+    int i = 1;
+
+    while (i < argc) {
+        if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "-a") == 0 ||
+            strcmp(argv[i], "-s") == 0) {
+            category_count++;
+            if (category_count > 1) { /* 허용된 조합만 지원 (01문서 9-3) */
+                fprintf(stderr, "usage: %s\n", usage);
+                return 1;
+            }
+            i++;
+        } else if (strcmp(argv[i], "-n") == 0) {
+            count_option++;
+            /* 값 누락 / 비숫자 / -n 중복 방어 */
+            if (count_option > 1 || i + 1 >= argc || !is_all_digits(argv[i + 1]) ||
+                atol(argv[i + 1]) <= 0) {
+                fprintf(stderr, "usage: %s\n", usage);
+                return 1;
+            }
+            i += 2;
+        } else {
+            fprintf(stderr, "usage: %s\n", usage);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* map -A..-G | -f | -find ROOM: -find는 값 필수 (02문서 3-3) */
+static int validate_map(int argc, char **argv)
+{
+    static const char *usage = "map -A | -B | -C | -D | -E | -F | -G | -f | -find [ROOM]";
+    static const char *floor_options[] = {
+        "-A", "-B", "-C", "-D", "-E", "-F", "-G", "-f"
+    };
+    int i;
+
+    if (argc == 3 && strcmp(argv[1], "-find") == 0) {
+        return 0;
+    }
+    if (argc == 2) {
+        for (i = 0; i < 8; i++) {
+            if (strcmp(argv[1], floor_options[i]) == 0) {
+                return 0;
+            }
+        }
+    }
+    fprintf(stderr, "usage: %s\n", usage); /* -find 값 누락/개수 오류/미정의 옵션 */
+    return 1;
+}
+
+/* contact -p NAME | -d DEPT | -e: -p, -d는 값 필수 (02문서 3-3) */
+static int validate_contact(int argc, char **argv)
+{
+    static const char *usage = "contact -p [NAME] | -d [DEPT] | -e";
+
+    if (argc == 2 && strcmp(argv[1], "-e") == 0) {
+        return 0;
+    }
+    if (argc == 3 && (strcmp(argv[1], "-p") == 0 || strcmp(argv[1], "-d") == 0)) {
+        return 0;
+    }
+    fprintf(stderr, "usage: %s\n", usage);
+    return 1;
+}
+
+int dispatch_campus_command(int argc, char **argv)
+{
+    static const char *bus_options[] = { "-1", "-2" };
+    static const char *bob_options[] = { "-t", "-e", "-d" };
+    static const char *weather_options[] = { "-c", "-w", "-d" };
+
+    if (strcmp(argv[0], "schedule") == 0) {
+        if (argc != 1) { /* 02문서 3-3: schedule은 인자 없음 */
+            fprintf(stderr, "usage: schedule\n");
+            return 1;
+        }
+        return handle_schedule_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "bus") == 0) {
+        if (validate_single_option(argc, argv, bus_options, 2, "bus -1 | -2") != 0) {
+            return 1;
+        }
+        return handle_bus_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "bob") == 0) {
+        if (validate_single_option(argc, argv, bob_options, 3, "bob -t | -e | -d") != 0) {
+            return 1;
+        }
+        return handle_bob_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "notice") == 0) {
+        if (validate_notice(argc, argv) != 0) {
+            return 1;
+        }
+        return handle_notice_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "map") == 0) {
+        if (validate_map(argc, argv) != 0) {
+            return 1;
+        }
+        return handle_map_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "weather") == 0) {
+        if (validate_single_option(argc, argv, weather_options, 3,
+                                   "weather -c | -w | -d") != 0) {
+            return 1;
+        }
+        return handle_weather_command(argc, argv);
+    }
+
+    if (strcmp(argv[0], "contact") == 0) {
+        if (validate_contact(argc, argv) != 0) {
+            return 1;
+        }
+        return handle_contact_command(argc, argv);
+    }
+
+    /* is_campus_command() 확인 없이 호출된 방어적 상황 */
+    fprintf(stderr, "error: unknown campus command '%s'\n", argv[0]);
+    return -1;
+}
+
+/* ============================================================
+ * schedule: AI소프트웨어학과 시간표 (schedule.txt)
+ * 스키마: day|period|time|course|professor|room
+ * ============================================================ */
+
+int handle_schedule_command(int argc, char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int printed = 0;
+
+    (void)argc;
+    (void)argv;
+
+    fp = open_campus_data("schedule.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    printf(TU_MINT "[AI소프트웨어학과 시간표]\n" COLOR_RESET);
+    fputs(TU_MINT, stdout);
+    print_padded("요일", 6);
+    print_padded("교시", 6);
+    print_padded("시간", 14);
+    print_padded("과목", 18);
+    print_padded("교수", 8);
+    fputs("강의실" COLOR_RESET "\n", stdout);
+
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
+            continue; /* 스키마 불일치 줄은 건너뜀 */
+        }
+        fputs(TU_MINT, stdout);
+        print_padded(f[0], 6);  /* 요일 */
+        print_padded(f[1], 6);  /* 교시 */
+        print_padded(f[2], 14); /* 시간 */
+        print_padded(f[3], 18); /* 과목 */
+        print_padded(f[4], 8);  /* 교수 */
+        fputs(f[5], stdout);    /* 강의실 */
+        fputs(COLOR_RESET "\n", stdout);
+        printed = 1;
+    }
+    fclose(fp);
+
+    if (!printed) {
+        printf("등록된 시간표가 없습니다.\n");
+    }
+    return 0;
+}
+
+/* ============================================================
+ * bus -1 | -2: 셔틀버스 시간표 (bus.txt)
+ * 스키마: route_code|name|stops(,)|weekday_times(,)|weekend_times(,)
+ * ============================================================ */
+
+int handle_bus_command(int argc, char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int found = 0;
+
+    (void)argc;
+
+    fp = open_campus_data("bus.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 5) {
+            continue;
+        }
+        if (strcmp(f[0], argv[1]) != 0) {
+            continue;
+        }
+        found = 1;
+        printf(TU_MINT "[%s]\n" COLOR_RESET, f[1]);
+        printf(TU_MINT "경유: " COLOR_RESET);
+        print_csv_as(f[2], " -> ");
+        printf("\n");
+        printf(TU_MINT "평일 %d회: " COLOR_RESET, count_csv_items(f[3]));
+        print_csv_as(f[3], " ");
+        printf("\n");
+        printf(TU_MINT "주말 %d회: " COLOR_RESET, count_csv_items(f[4]));
+        print_csv_as(f[4], " ");
+        printf("\n");
+        break; /* route_code는 유일 */
+    }
+    fclose(fp);
+
+    if (!found) {
+        printf("해당 노선 정보를 찾을 수 없습니다.\n");
+    }
+    return 0;
+}
+
+/* ============================================================
+ * bob -t | -e | -d: 학식 메뉴 (bob.txt) - 가장 최근 날짜의 메뉴 출력
+ * 스키마: date|weekday|restaurant_code|restaurant_name|price|menu(,)
+ * ============================================================ */
+
+int handle_bob_command(int argc, char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    char best_date[16];
+    char best_weekday[8];
+    char best_name[64];
+    char best_price[16];
+    char best_menu[256];
+    int found = 0;
+
+    (void)argc;
+
+    fp = open_campus_data("bob.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    /* bob.txt는 날짜 오름차순이므로 마지막 매칭 줄이 최신 메뉴다. */
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
+            continue;
+        }
+        if (strcmp(f[2], argv[1]) != 0) {
+            continue;
+        }
+        found = 1;
+        snprintf(best_date, sizeof(best_date), "%s", f[0]);
+        snprintf(best_weekday, sizeof(best_weekday), "%s", f[1]);
+        snprintf(best_name, sizeof(best_name), "%s", f[3]);
+        snprintf(best_price, sizeof(best_price), "%s", f[4]);
+        snprintf(best_menu, sizeof(best_menu), "%s", f[5]);
+    }
+    fclose(fp);
+
+    if (!found) {
+        printf("해당 식당의 메뉴 정보를 찾을 수 없습니다.\n");
+        return 0;
+    }
+
+    printf(TU_MINT "[%s] %s (%s)  %s원\n" COLOR_RESET,
+           best_name, best_date, best_weekday, best_price);
+    printf(TU_MINT "메뉴: " COLOR_RESET);
+    print_csv_as(best_menu, ", ");
+    printf("\n");
+    return 0;
+}
+
+/* ============================================================
+ * notice [-g|-a|-s] [-n N]: 공지사항 (notice.txt, 최신순 정렬됨)
+ * 스키마: id|date|category_code|title
+ * ============================================================ */
+
+static const char *notice_category_label(const char *code)
+{
+    if (code == NULL) {
+        return "전체";
+    }
+    if (strcmp(code, "-g") == 0) {
+        return "일반";
+    }
+    if (strcmp(code, "-a") == 0) {
+        return "학사";
+    }
+    if (strcmp(code, "-s") == 0) {
+        return "장학";
+    }
+    return "전체";
+}
+
+int handle_notice_command(int argc, char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    const char *category = NULL; /* NULL이면 전체 (분류 필터 없음) */
+    long limit = 0;              /* 0이면 -n 미지정 (전체 출력) */
+    long total = 0;
+    long shown;
+    long index = 0;
+    int i;
+
+    /* 옵션 해석 - 값/중복 검증은 dispatch 이전 validate_notice()에서 이미 끝났다 */
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "-a") == 0 ||
+            strcmp(argv[i], "-s") == 0) {
+            category = argv[i];
+        } else if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
+            limit = atol(argv[i + 1]);
+            i++;
+        }
+    }
+
+    /* 1차 순회: 분류 조건에 맞는 총 건수 계산 (헤더 표기용) */
+    fp = open_campus_data("notice.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 4) {
+            continue;
+        }
+        if (category != NULL && strcmp(f[2], category) != 0) {
+            continue;
+        }
+        total++;
+    }
+    fclose(fp);
+
+    shown = (limit > 0 && limit < total) ? limit : total;
+
+    if (limit > 0) {
+        printf(TU_MINT "[%s 공지] 최근 %ld건\n" COLOR_RESET,
+               notice_category_label(category), shown);
+    } else {
+        printf(TU_MINT "[%s 공지] 전체 %ld건\n" COLOR_RESET,
+               notice_category_label(category), shown);
+    }
+
+    if (shown == 0) {
+        printf("등록된 공지가 없습니다.\n");
+        return 0;
+    }
+
+    /* 2차 순회: notice.txt가 최신순이므로 상위 shown건이 곧 "최근 N건"이다 */
+    fp = open_campus_data("notice.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+    while (index < shown && read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 4) {
+            continue;
+        }
+        if (category != NULL && strcmp(f[2], category) != 0) {
+            continue;
+        }
+        index++;
+        printf(TU_MINT "%2ld. [%s] %s  (%s)\n" COLOR_RESET,
+               index, notice_category_label(f[2]), f[3], f[1]);
+    }
+    fclose(fp);
+
+    return 0;
+}
+
+/* ============================================================
+ * map -A..-G | -f | -find ROOM: 캠퍼스 안내 (map.txt)
+ * 스키마: BUILDING|code|name|floor|floor_desc
+ *        FAC|name|location
+ *        ROOM|room_no|building|floor|desc
+ * ============================================================ */
+
+/* map -find [ROOM]: 강의실 위치 검색 */
+static int handle_map_find(char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int found = 0;
+
+    fp = open_campus_data("map.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 5) {
+            continue;
+        }
+        if (strcmp(f[0], "ROOM") != 0 || strcmp(f[1], argv[2]) != 0) {
+            continue;
+        }
+        found = 1;
+        printf(TU_MINT "[%s] %s %s층 - %s\n" COLOR_RESET, f[1], f[2], f[3], f[4]);
+        break; /* room_no는 유일 */
+    }
+    fclose(fp);
+
+    if (!found) {
+        printf("%s: 해당 강의실 정보를 찾을 수 없습니다.\n", argv[2]);
+    }
+    return 0;
+}
+
+/* map -f: 교내 편의시설 */
+static int handle_map_facility(void)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int printed = 0;
+
+    fp = open_campus_data("map.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    printf(TU_MINT "[교내 편의시설]\n" COLOR_RESET);
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 3) {
+            continue;
+        }
+        if (strcmp(f[0], "FAC") != 0) {
+            continue;
+        }
+        fputs(TU_MINT, stdout);
+        print_padded(f[1], 20); /* 시설명 */
+        fputs(f[2], stdout);    /* 위치 */
+        fputs(COLOR_RESET "\n", stdout);
+        printed = 1;
+    }
+    fclose(fp);
+
+    if (!printed) {
+        printf("등록된 편의시설이 없습니다.\n");
+    }
+    return 0;
+}
+
+/* map -A ~ -G: 건물별 층 안내 (BUILDING 레코드는 건물당 여러 줄) */
+static int handle_map_building(char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int printed = 0;
+
+    fp = open_campus_data("map.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 5) {
+            continue;
+        }
+        if (strcmp(f[0], "BUILDING") != 0 || strcmp(f[1], argv[1]) != 0) {
+            continue;
+        }
+        if (!printed) {
+            printf(TU_MINT "[%s]\n" COLOR_RESET, f[2]);
+        }
+        printf(TU_MINT "%3s층: %s\n" COLOR_RESET, f[3], f[4]);
+        printed = 1;
+    }
+    fclose(fp);
+
+    if (!printed) {
+        printf("해당 건물 정보를 찾을 수 없습니다.\n");
+    }
+    return 0;
+}
+
+int handle_map_command(int argc, char **argv)
+{
+    (void)argc;
+
+    if (strcmp(argv[1], "-find") == 0) {
+        return handle_map_find(argv);
+    }
+    if (strcmp(argv[1], "-f") == 0) {
+        return handle_map_facility();
+    }
+    return handle_map_building(argv);
+}
+
+/* ============================================================
+ * weather -c | -w | -d: 시흥 캠퍼스 날씨 (weather.txt)
+ * 스키마: date|location|condition|temp_high|temp_low|dust_level
+ * weather.txt 주석 규약: 마지막 줄이 현재 날씨(-c), 최근 7줄이 주간 예보(-w)
+ * ============================================================ */
+
+typedef struct {
+    char date[16];
+    char location[32];
+    char condition[16];
+    char temp_high[8];
+    char temp_low[8];
+    char dust[16];
+} WeatherRow;
+
+/*
+ * load_weather_rows
+ *  - weather.txt 전체를 고정 크기 배열에 적재한다(동적 할당 없음).
+ *  - 반환값: 읽은 행 수, 파일 열기 실패 시 -1
+ */
+static long load_weather_rows(WeatherRow *rows, long max_rows)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    long count = 0;
+
+    fp = open_campus_data("weather.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (count < max_rows && read_data_line(fp, line, sizeof(line))) {
+        if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
+            continue;
+        }
+        snprintf(rows[count].date, sizeof(rows[count].date), "%s", f[0]);
+        snprintf(rows[count].location, sizeof(rows[count].location), "%s", f[1]);
+        snprintf(rows[count].condition, sizeof(rows[count].condition), "%s", f[2]);
+        snprintf(rows[count].temp_high, sizeof(rows[count].temp_high), "%s", f[3]);
+        snprintf(rows[count].temp_low, sizeof(rows[count].temp_low), "%s", f[4]);
+        snprintf(rows[count].dust, sizeof(rows[count].dust), "%s", f[5]);
+        count++;
+    }
+    fclose(fp);
+
+    return count;
+}
+
+int handle_weather_command(int argc, char **argv)
+{
+    WeatherRow rows[WEATHER_MAX_ROWS];
+    const WeatherRow *latest;
+    long count;
+    long start;
+    long i;
+
+    (void)argc;
+
+    count = load_weather_rows(rows, WEATHER_MAX_ROWS);
+    if (count < 0) {
+        return -1;
+    }
+    if (count == 0) {
+        printf("날씨 정보를 찾을 수 없습니다.\n");
+        return 0;
+    }
+
+    latest = &rows[count - 1];
+    start = (count > WEATHER_RECENT_DAYS) ? count - WEATHER_RECENT_DAYS : 0;
+
+    if (strcmp(argv[1], "-c") == 0) {
+        printf(TU_MINT "[현재 날씨] %s (%s)\n" COLOR_RESET,
+               latest->location, latest->date);
+        printf(TU_MINT "%s  최고 %s'C / 최저 %s'C  미세먼지 %s\n" COLOR_RESET,
+               latest->condition, latest->temp_high, latest->temp_low, latest->dust);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "-w") == 0) {
+        printf(TU_MINT "[주간 예보] 최근 %ld일\n" COLOR_RESET, count - start);
+        fputs(TU_MINT, stdout);
+        print_padded("날짜", 13);
+        print_padded("날씨", 11);
+        print_padded("최고/최저", 15);
+        fputs("미세먼지" COLOR_RESET "\n", stdout);
+        for (i = start; i < count; i++) {
+            char temp_buf[24];
+            snprintf(temp_buf, sizeof(temp_buf), "%s/%s'C",
+                     rows[i].temp_high, rows[i].temp_low);
+            fputs(TU_MINT, stdout);
+            print_padded(rows[i].date, 13);
+            print_padded(rows[i].condition, 11);
+            print_padded(temp_buf, 15);
+            fputs(rows[i].dust, stdout);
+            fputs(COLOR_RESET "\n", stdout);
+        }
+        return 0;
+    }
+
+    /* -d: 미세먼지 */
+    printf(TU_MINT "[미세먼지] %s 기준\n" COLOR_RESET, latest->location);
+    printf(TU_MINT "현재 (%s): %s\n" COLOR_RESET, latest->date, latest->dust);
+    printf(TU_MINT "최근 %ld일: " COLOR_RESET, count - start);
+    for (i = start; i < count; i++) {
+        printf("%s%s", rows[i].dust, (i + 1 < count) ? ", " : "");
+    }
+    printf("\n");
+    return 0;
+}
+
+/* ============================================================
+ * contact -p NAME | -d DEPT | -e: 연락처 검색 (contact.txt)
+ * 스키마: PROF|name|dept|office|phone|email
+ *        DEPT|name|phone|location
+ *        EMERG|name|phone
+ * ============================================================ */
+
+int handle_contact_command(int argc, char **argv)
+{
+    FILE *fp;
+    char line[CAMPUS_LINE_MAX];
+    char *f[CAMPUS_MAX_FIELDS];
+    int matched = 0;
+
+    (void)argc;
+
+    fp = open_campus_data("contact.txt");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    if (strcmp(argv[1], "-p") == 0) {
+        printf(TU_MINT "[교수 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 6) {
+                continue;
+            }
+            /* 01문서 6-2의 jobs -name과 동일하게 부분 문자열 검색 */
+            if (strcmp(f[0], "PROF") != 0 || strstr(f[1], argv[2]) == NULL) {
+                continue;
+            }
+            fputs(TU_MINT, stdout);
+            print_padded(f[1], 9);  /* 이름 */
+            print_padded(f[2], 19); /* 학과 */
+            print_padded(f[3], 10); /* 연구실 */
+            print_padded(f[4], 16); /* 전화 */
+            fputs(f[5], stdout);    /* 이메일 */
+            fputs(COLOR_RESET "\n", stdout);
+            matched = 1;
+        }
+    } else if (strcmp(argv[1], "-d") == 0) {
+        printf(TU_MINT "[부서 연락처] \"%s\" 검색 결과\n" COLOR_RESET, argv[2]);
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 4) {
+                continue;
+            }
+            if (strcmp(f[0], "DEPT") != 0 || strstr(f[1], argv[2]) == NULL) {
+                continue;
+            }
+            fputs(TU_MINT, stdout);
+            print_padded(f[1], 16); /* 부서명 */
+            print_padded(f[2], 16); /* 전화 */
+            fputs(f[3], stdout);    /* 위치 */
+            fputs(COLOR_RESET "\n", stdout);
+            matched = 1;
+        }
+    } else { /* -e: 긴급 연락처 전체 */
+        printf(TU_MINT "[긴급 연락처]\n" COLOR_RESET);
+        while (read_data_line(fp, line, sizeof(line))) {
+            if (split_pipe(line, f, CAMPUS_MAX_FIELDS) < 3) {
+                continue;
+            }
+            if (strcmp(f[0], "EMERG") != 0) {
+                continue;
+            }
+            fputs(TU_MINT, stdout);
+            print_padded(f[1], 22); /* 이름 */
+            fputs(f[2], stdout);    /* 전화 */
+            fputs(COLOR_RESET "\n", stdout);
+            matched = 1;
+        }
+    }
+    fclose(fp);
+
+    if (!matched) {
+        printf("검색 결과가 없습니다.\n");
+    }
+    return 0;
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include "commands.h"
+#include "process.h"
+#include "tuk_shell.h"
+
+/* 4단계 기준 내장 명령어 목록. 캠퍼스 명령어(7단계)는 campus.c에서 별도 관리한다. */
+static const char *BUILTIN_NAMES[] = { "cd", "pwd", "help", "exit", "jobs", "top" };
+static const int BUILTIN_COUNT = 6;
+
+int is_builtin(const char *cmd)
+{
+    int i;
+
+    if (cmd == NULL) {
+        return 0;
+    }
+    for (i = 0; i < BUILTIN_COUNT; i++) {
+        if (strcmp(cmd, BUILTIN_NAMES[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int handle_cd(int argc, char **argv)
+{
+    const char *target;
+
+    /* 인자 2개 이상 -> usage 출력 (01문서 5-2) */
+    if (argc >= 3) {
+        fprintf(stderr, "usage: cd [path]\n");
+        return 1;
+    }
+
+    if (argc == 1) {
+        /*
+         * 팀 합의 사항(01문서 5-2 "인자 0개" 항목): 인자 없을 때는 HOME으로 이동.
+         * 필요 시 이 부분을 미지원(오류 처리)으로 바꾸는 것도 가능하나,
+         * 일반 쉘 관례를 따라 HOME 이동을 기본값으로 채택.
+         */
+        target = getenv("HOME");
+        if (target == NULL) {
+            fprintf(stderr, "cd: HOME environment variable not set\n");
+            return 1;
+        }
+    } else {
+        target = argv[1];
+    }
+
+    if (chdir(target) != 0) {
+        perror("cd"); /* 05문서 3-1: 반환값 검증 + perror */
+        return 0;     /* 실패해도 쉘 종료 아님, 현재 디렉토리 유지 */
+    }
+
+    return 0;
+}
+
+int handle_pwd(int argc, char **argv)
+{
+    char cwd[MAX_INPUT_LENGTH];
+    (void)argv; /* 시그니처 통일을 위해 유지, 실제로는 사용하지 않음 */
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: pwd\n");
+        return 1;
+    }
+
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        perror("pwd");
+        return 0;
+    }
+
+    printf("%s\n", cwd);
+    return 0;
+}
+
+int handle_help(int argc, char **argv)
+{
+    (void)argv;
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: help\n");
+        return 1;
+    }
+
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어\n" COLOR_RESET);
+    printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
+    printf("  pwd                 현재 작업 디렉토리 출력\n");
+    printf("  help                이 도움말 출력\n");
+    printf("  exit                쉘 종료\n");
+    printf("  jobs                전체 백그라운드 작업 목록 출력\n");
+    printf("  jobs -pid [PID]     PID로 작업 검색\n");
+    printf("  jobs -name [NAME]   이름(부분 문자열)으로 작업 검색\n");
+    printf("  top -cpu            CPU 사용량 내림차순 정렬 출력\n");
+    printf("  top -mem            메모리 사용량 내림차순 정렬 출력\n");
+    printf("  top -time           실행시간 내림차순 정렬 출력\n");
+    printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
+    printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
+    printf("\n");
+    printf(TU_BLUE "캠퍼스 특화 명령어\n" COLOR_RESET);
+    printf("  schedule                  AI소프트웨어학과 시간표 출력\n");
+    printf("  bus -1 | -2               1캠퍼스 / 2캠퍼스 셔틀 시간표\n");
+    printf("  bob -t | -e | -d          TIP 지하 / E동 레스토랑 / 대신식당 메뉴\n");
+    printf("  notice [-g|-a|-s] [-n N]  공지사항 (일반/학사/장학, 최근 N개)\n");
+    printf("  map -A ~ -G               건물별 층 안내\n");
+    printf("  map -f                    교내 편의시설 안내\n");
+    printf("  map -find [강의실]        강의실 위치 검색\n");
+    printf("  weather -c | -w | -d      현재 날씨 / 주간 예보 / 미세먼지\n");
+    printf("  contact -p [이름]         교수 연락처 검색\n");
+    printf("  contact -d [부서명]       행정부서 연락처 검색\n");
+    printf("  contact -e                긴급 연락처 모아보기\n");
+
+    return 0;
+}
+
+int handle_exit(int argc, char **argv)
+{
+    (void)argv;
+
+    if (argc > 1) {
+        fprintf(stderr, "usage: exit\n");
+        return 1;
+    }
+    /*
+     * 실제 자원 정리(백그라운드 리스트 free, 히스토리 flush/close 등)는
+     * main.c의 종료 파이프라인에서 수행한다. 여기서는 종료 신호 역할만 한다.
+     */
+    return 0;
+}
+
+/* jobs 출력 컬럼 헤더 (01문서 6-4, 02문서 1-2 "표 형식 출력은 컬럼 제목을 포함한다") */
+static void print_jobs_header(void)
+{
+    printf("%-6s %-8s %-9s %-10s %-6s %-9s %s\n",
+           "JOB#", "PID", "STATUS", "START_TIME", "CPU%", "MEM(KB)", "COMMAND");
+}
+
+/* 노드 한 건을 01문서 6-4 포맷에 맞춰 출력 */
+static void print_job_row(int job_number, const ProcessInfo *proc)
+{
+    char job_col[16];
+    char time_buf[16];
+    struct tm *tm_info;
+
+    snprintf(job_col, sizeof(job_col), "[%d]", job_number);
+
+    tm_info = localtime(&proc->start_time);
+    if (tm_info != NULL) {
+        strftime(time_buf, sizeof(time_buf), "%H:%M:%S", tm_info);
+    } else {
+        snprintf(time_buf, sizeof(time_buf), "--:--:--");
+    }
+
+    printf("%-6s %-8d %-9s %-10s %-6.1f %-9ld %s\n",
+           job_col, (int)proc->pid, process_status_to_string(proc->status),
+           time_buf, proc->cpu_usage, proc->mem_usage_kb, proc->command);
+}
+
+/* argv[2]가 순수 숫자(PID)인지 검사 - "jobs -pid abc" 방어 (01문서 6-3) */
+static int is_all_digits(const char *s)
+{
+    if (s == NULL || *s == '\0') {
+        return 0;
+    }
+    for (; *s != '\0'; s++) {
+        if (*s < '0' || *s > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* jobs (인자 없음): 전체 목록 출력 */
+static int handle_jobs_all(ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    int job_number;
+
+    if (head == NULL) {
+        printf("No background jobs.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        print_job_row(job_number, cur);
+    }
+    return 0;
+}
+
+/* jobs -pid [PID]: PID 완전 일치 검색 (01문서 6-2) */
+static int handle_jobs_by_pid(int argc, char **argv, ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *found = NULL;
+    int job_number;
+    int found_index = 0;
+    pid_t target_pid;
+
+    if (argc != 3) {
+        fprintf(stderr, "usage: jobs -pid [PID]\n");
+        return 1;
+    }
+    if (!is_all_digits(argv[2])) {
+        fprintf(stderr, "invalid jobs option: PID must be numeric\n");
+        return 1;
+    }
+    target_pid = (pid_t)atol(argv[2]);
+
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        if (cur->pid == target_pid) {
+            found = cur;
+            found_index = job_number;
+            break; /* PID는 유일하므로 첫 매칭에서 종료 */
+        }
+    }
+
+    if (found == NULL) {
+        printf("No matching job found.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    print_job_row(found_index, found);
+    return 0;
+}
+
+/* jobs -name [KEYWORD]: name 필드 부분 문자열 검색 (01문서 6-2) */
+static int handle_jobs_by_name(int argc, char **argv, ProcessInfo *head)
+{
+    ProcessInfo *cur;
+    int job_number;
+    int matched = 0;
+
+    if (argc != 3) {
+        fprintf(stderr, "usage: jobs -name [KEYWORD]\n");
+        return 1;
+    }
+
+    for (cur = head; cur != NULL; cur = cur->next) {
+        if (strstr(cur->name, argv[2]) != NULL) {
+            matched = 1;
+            break;
+        }
+    }
+
+    if (!matched) {
+        printf("No matching job found.\n");
+        return 0;
+    }
+
+    print_jobs_header();
+    job_number = 1;
+    for (cur = head; cur != NULL; cur = cur->next, job_number++) {
+        if (strstr(cur->name, argv[2]) != NULL) {
+            print_job_row(job_number, cur);
+        }
+    }
+    return 0;
+}
+
+int handle_jobs(int argc, char **argv, ProcessInfo **job_list)
+{
+    /* 03문서 6-1: jobs 호출 -> 백그라운드 상태 갱신을 먼저 수행 */
+    refresh_all_processes(job_list);
+
+    if (argc == 1) {
+        return handle_jobs_all(*job_list);
+    }
+
+    if (strcmp(argv[1], "-pid") == 0) {
+        return handle_jobs_by_pid(argc, argv, *job_list);
+    }
+
+    if (strcmp(argv[1], "-name") == 0) {
+        return handle_jobs_by_name(argc, argv, *job_list);
+    }
+
+    fprintf(stderr, "invalid jobs option\n");
+    return 1;
+}
+
+/*
+ * TopEntry
+ *  - 정렬 기준(-cpu/-mem/-time)에 따라 미리 계산해 둔 metric 값과 원본 노드
+ *    포인터를 함께 담는다. qsort 콜백은 이 metric만 비교하면 되므로
+ *    옵션별 분기를 컴페어 함수 밖에서 한 번만 처리할 수 있다.
+ */
+typedef struct {
+    ProcessInfo *proc;
+    double metric;
+} TopEntry;
+
+/* 내림차순 비교 콜백 (01문서 7-3 "비교 함수는 직접 구현") */
+static int compare_top_entry_desc(const void *a, const void *b)
+{
+    const TopEntry *ea = (const TopEntry *)a;
+    const TopEntry *eb = (const TopEntry *)b;
+
+    if (ea->metric < eb->metric) {
+        return 1;
+    }
+    if (ea->metric > eb->metric) {
+        return -1;
+    }
+    return 0;
+}
+
+int handle_top(int argc, char **argv, ProcessInfo **job_list)
+{
+    ProcessInfo *cur;
+    TopEntry *entries;
+    int count;
+    int i;
+    time_t now;
+
+    /* 03문서 6-2: top 호출 -> 백그라운드 상태 갱신 먼저 */
+    refresh_all_processes(job_list);
+
+    /* 옵션이 없거나 2개 이상이면 사용법 출력 (01문서 7-4) */
+    if (argc != 2) {
+        fprintf(stderr, "usage: top -cpu | top -mem | top -time\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "-cpu") != 0 &&
+        strcmp(argv[1], "-mem") != 0 &&
+        strcmp(argv[1], "-time") != 0) {
+        fprintf(stderr, "invalid top option\n");
+        return 1;
+    }
+
+    count = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next) {
+        count++;
+    }
+
+    if (count == 0) {
+        printf("No background jobs.\n"); /* 01문서 7-3 */
+        return 0;
+    }
+
+    /* 리스트를 출력용 배열로 복사 - 원본 연결 리스트는 정렬하지 않는다 (01문서 7-3) */
+    entries = (TopEntry *)malloc(sizeof(TopEntry) * (size_t)count);
+    if (entries == NULL) {
+        perror("malloc");
+        return -1;
+    }
+
+    now = time(NULL);
+    i = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next, i++) {
+        entries[i].proc = cur;
+        if (strcmp(argv[1], "-cpu") == 0) {
+            entries[i].metric = cur->cpu_usage;
+        } else if (strcmp(argv[1], "-mem") == 0) {
+            entries[i].metric = (double)cur->mem_usage_kb;
+        } else { /* -time: 현재 시각 - start_time 내림차순 (01문서 7-2) */
+            entries[i].metric = difftime(now, cur->start_time);
+        }
+    }
+
+    qsort(entries, (size_t)count, sizeof(TopEntry), compare_top_entry_desc);
+
+    print_jobs_header();
+    for (i = 0; i < count; i++) {
+        print_job_row(i + 1, entries[i].proc);
+    }
+
+    /* [free] 정렬용 임시 배열 해제 - 원본 ProcessInfo 노드는 그대로 리스트 소유 (03문서 6-2) */
+    free(entries);
+
+    return 0;
+}
+
+int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_list)
+{
+    *should_exit = 0;
+
+    if (strcmp(argv[0], "cd") == 0) {
+        return handle_cd(argc, argv);
+    } else if (strcmp(argv[0], "pwd") == 0) {
+        return handle_pwd(argc, argv);
+    } else if (strcmp(argv[0], "help") == 0) {
+        return handle_help(argc, argv);
+    } else if (strcmp(argv[0], "jobs") == 0) {
+        return handle_jobs(argc, argv, job_list);
+    } else if (strcmp(argv[0], "top") == 0) {
+        return handle_top(argc, argv, job_list);
+    } else if (strcmp(argv[0], "exit") == 0) {
+        int result = handle_exit(argc, argv);
+        if (result == 0) {
+            *should_exit = 1;
+        }
+        return result;
+    }
+
+    /* is_builtin() 확인 없이 호출된 방어적 상황 */
+    fprintf(stderr, "error: unknown builtin command '%s'\n", argv[0]);
+    return -1;
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include "executor.h"
+#include "commands.h"
+#include "campus.h"
+#include "process.h"
+#include "tuk_shell.h"
+
+/*
+ * execute_external
+ *  - fork() 후 자식은 execvp()로 프로그램 교체.
+ *  - execvp 실패 시 자식은 perror + exit(1)만 하고, 부모 자원(리스트/히스토리 등)에는
+ *    절대 접근하지 않는다 (05_개발철칙명세서.md 3-2 "자식 프로세스 에러 전파 차단").
+ *  - 백그라운드 실행 시 ProcessInfo 노드를 생성해 job_list에 등록한다 (2단계).
+ */
+static int execute_external(char **argv, int background_flag, const char *raw_command,
+                             ProcessInfo **job_list)
+{
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid < 0) {
+        perror("fork"); /* 05문서 3-1 */
+        return -1;
+    }
+
+    if (pid == 0) {
+        /* --- 자식 프로세스 --- */
+        if (execvp(argv[0], argv) == -1) {
+            perror(argv[0]);
+            exit(1); /* 부모가 waitpid로 종료코드 회수 가능하도록 즉시 종료 */
+        }
+        /* execvp 성공 시 이 지점에 도달하지 않음 */
+    }
+
+    /* --- 부모 프로세스 --- */
+    if (background_flag) {
+        ProcessInfo *node = create_process_node(pid, argv, raw_command);
+
+        if (node == NULL) {
+            /* 노드 생성 실패해도 자식 프로세스 자체는 이미 실행 중 - 등록만 실패 처리 */
+            fprintf(stderr, "warning: failed to register background job (pid=%d)\n", (int)pid);
+        } else if (append_process(job_list, node) != 0) {
+            fprintf(stderr, "warning: failed to append background job (pid=%d)\n", (int)pid);
+            free(node); /* 리스트에 들어가지 못한 노드는 즉시 해제 (누수 방지) */
+        }
+
+        /* 시작 메시지 형식 - 03문서 4-4, 색상 TU SKY BLUE */
+        printf(TU_SKY_BLUE "[bg] pid=%d command=\"%s\"\n" COLOR_RESET,
+               (int)pid, raw_command);
+        return 0;
+    }
+
+    /* 포그라운드: 자식 종료까지 대기 후 REPL 복귀 (03문서 4-3) */
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid");
+        return -1;
+    }
+
+    return 0;
+}
+
+int execute_command(int argc, char **argv, int background_flag, const char *raw_command,
+                     int *should_exit, ProcessInfo **job_list)
+{
+    *should_exit = 0;
+
+    if (argc <= 0 || argv[0] == NULL) {
+        return 0;
+    }
+
+    if (is_builtin(argv[0])) {
+        /*
+         * 백그라운드 금지 내장 명령어 (01문서 5-3): 현재 인식되는 cd/pwd/help/exit
+         * 전부 금지 목록에 포함된다. jobs/top이 추가되어도 is_builtin()만
+         * 확장하면 되므로 이 로직은 변경할 필요가 없다.
+         */
+        if (background_flag) {
+            fprintf(stderr, "built-in command cannot run in background\n");
+            return 1;
+        }
+        return execute_builtin(argc, argv, should_exit, job_list);
+    }
+
+    /*
+     * 캠퍼스 특화 명령어 (7단계) - 03문서 4-2에 따라 쉘 프로세스 내부에서 직접
+     * 실행되므로 내장 명령어와 동일하게 백그라운드 조합을 금지한다.
+     * 데이터 로드 실패(-1)는 해당 명령만 실패시키고 쉘은 계속 유지한다 (03문서 8장).
+     */
+    if (is_campus_command(argv[0])) {
+        if (background_flag) {
+            fprintf(stderr, "built-in command cannot run in background\n");
+            return 1;
+        }
+        return dispatch_campus_command(argc, argv);
+    }
+
+    return execute_external(argv, background_flag, raw_command, job_list);
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "history.h"
+#include "tuk_shell.h"
+
+#define HISTORY_INITIAL_CAPACITY 64
+
+/*
+ * dup_string
+ *  - strdup()은 표준 C11에 없고 POSIX 확장이라 -std=c11 빌드에서 선언 경고를 피하기 위해
+ *    직접 구현한다.
+ *  - 해제 시점: 호출부(history_append_to_buffer)가 실패 시 즉시 free하거나,
+ *    성공 시 ctx->entries에 보관했다가 history_close()에서 일괄 free한다.
+ */
+static char *dup_string(const char *src)
+{
+    size_t len = strlen(src) + 1;
+    char *copy = (char *)malloc(len);
+
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, src, len);
+    return copy;
+}
+
+/*
+ * history_append_to_buffer
+ *  - line을 복제하여 ctx->entries에 추가한다. 필요 시 realloc으로 배열을 2배 확장한다.
+ *  - 성공 0, 실패 -1 (malloc/realloc 실패).
+ *
+ * [malloc 지점] dup_string()의 결과와 realloc된 entries 배열은
+ * history_close()에서 세션 종료 시 일괄 free된다 (05문서 2-1).
+ */
+static int history_append_to_buffer(HistoryContext *ctx, const char *line)
+{
+    char *copy;
+
+    if (ctx->count >= ctx->capacity) {
+        int new_capacity = (ctx->capacity == 0) ? HISTORY_INITIAL_CAPACITY : ctx->capacity * 2;
+        char **new_entries = (char **)realloc(ctx->entries, sizeof(char *) * (size_t)new_capacity);
+
+        if (new_entries == NULL) {
+            perror("malloc"); /* 03문서 7-3: 메모리 버퍼 추가 실패, 파일 저장은 이미 완료된 상태 */
+            return -1;
+        }
+        ctx->entries = new_entries;
+        ctx->capacity = new_capacity;
+    }
+
+    copy = dup_string(line);
+    if (copy == NULL) {
+        perror("malloc");
+        return -1;
+    }
+
+    ctx->entries[ctx->count] = copy;
+    ctx->count++;
+    return 0;
+}
+
+void history_init(HistoryContext *ctx)
+{
+    char line_buf[MAX_INPUT_LENGTH];
+
+    ctx->entries = NULL;
+    ctx->count = 0;
+    ctx->capacity = 0;
+    ctx->fp = NULL;
+    ctx->enabled = 0;
+
+    /* "a+": 없으면 생성, 있으면 유지. 쓰기는 항상 파일 끝에, 읽기는 위치 지정 필요 */
+    ctx->fp = fopen(HISTORY_FILE_NAME, "a+");
+    if (ctx->fp == NULL) {
+        perror("history"); /* 01문서 8-3: 실패해도 쉘 전체 종료로 이어지지 않음 */
+        return; /* enabled=0 유지 -> 이후 history_add는 아무 동작 안 함 */
+    }
+
+    ctx->enabled = 1;
+
+    /* 기존 히스토리 로드 - 01문서 8-2, 03문서 7-2 */
+    rewind(ctx->fp);
+    while (fgets(line_buf, sizeof(line_buf), ctx->fp) != NULL) {
+        size_t len = strlen(line_buf);
+
+        if (len > 0 && line_buf[len - 1] == '\n') {
+            line_buf[len - 1] = '\0';
+        }
+        if (line_buf[0] != '\0') {
+            /* 로드 단계에서 메모리 실패해도 파일 자체는 이미 존재하므로 쉘은 계속 진행 */
+            history_append_to_buffer(ctx, line_buf);
+        }
+    }
+}
+
+void history_add(HistoryContext *ctx, const char *line)
+{
+    if (line == NULL || line[0] == '\0') {
+        return; /* 빈 줄은 저장하지 않음 - 01문서 8-1 */
+    }
+
+    if (!ctx->enabled || ctx->fp == NULL) {
+        return; /* 히스토리 비활성화 상태 - 01문서 8-3 */
+    }
+
+    if (fprintf(ctx->fp, "%s\n", line) < 0) {
+        perror("history"); /* 03문서 7-3: 파일 쓰기 실패해도 현재 명령 실행은 계속 진행 */
+    } else if (fflush(ctx->fp) != 0) {
+        perror("history");
+    }
+
+    /* 메모리 버퍼 추가 실패는 파일 저장에 영향 주지 않음 (이미 위에서 완료됨) */
+    history_append_to_buffer(ctx, line);
+}
+
+void history_close(HistoryContext *ctx)
+{
+    int i;
+
+    if (ctx->fp != NULL) {
+        fflush(ctx->fp); /* 05문서 2-2: 디스크에 물리적으로 기록되도록 보장 */
+        fclose(ctx->fp);
+        ctx->fp = NULL;
+    }
+
+    /* [free] 세션 종료 시 메모리 버퍼에 남아있던 모든 문자열과 배열 자체 해제 (05문서 2-1) */
+    for (i = 0; i < ctx->count; i++) {
+        free(ctx->entries[i]);
+    }
+    free(ctx->entries);
+    ctx->entries = NULL;
+    ctx->count = 0;
+    ctx->capacity = 0;
+}
+
+#include <stdio.h>
+#include <string.h>
+#include "tuk_shell.h"
+#include "parser.h"
+#include "executor.h"
+#include "process.h"
+#include "history.h"
+
+int main(void)
+{
+    char line[MAX_INPUT_LENGTH];
+    char raw_line[MAX_INPUT_LENGTH];     /* 히스토리 저장용: '&' 포함 원본 그대로 */
+    char command_line[MAX_INPUT_LENGTH]; /* 실행/메시지용: '&' 제거본 (5단계와 동일) */
+    char *argv[MAX_ARGS + 1];
+    int argc;
+    int background_flag;
+    int should_exit;
+    size_t len;
+    ProcessInfo *job_list = NULL; /* 2단계: 백그라운드 작업 연결 리스트 헤드 */
+    HistoryContext history;       /* 6단계: 히스토리 파일/메모리 버퍼 컨텍스트 */
+
+    /* 한국공학대학교 로고 및 환영 메시지 출력 */
+    printf(TU_BLUE);
+    printf("           /\\           \n");
+    printf("        /\\/  \\/\\        \n");
+    printf("       / / \\/ \\ \\       \n");
+    printf("       \\ \\ /\\ / /       \n");
+    printf("        \\/\\  /\\/        \n");
+    printf("           \\/           \n");
+    printf("\n");
+    printf("   WELCOME TO TUK OS    \n");
+    printf("========================\n");
+    printf(COLOR_RESET);
+
+    history_init(&history); /* 03문서 2-1 [3]: .tuk_history 열기 및 기존 이력 로드 */
+
+    while (1) {
+        /* 백그라운드 상태 갱신: REPL 한 사이클 시작 직전 (03문서 5-1) */
+        refresh_all_processes(&job_list);
+
+        /* [1] 프롬프트 출력 - TU BLUE */
+        printf(TU_BLUE "TUK-OS > " COLOR_RESET);
+        fflush(stdout);
+
+        /* [2] 한 줄 입력 수신 */
+        if (fgets(line, sizeof(line), stdin) == NULL) {
+            printf("\n");
+            break; /* EOF -> 종료 파이프라인 */
+        }
+
+        len = strlen(line);
+        if (len > 0 && line[len - 1] != '\n') {
+            int c;
+            fprintf(stderr, "error: input too long (max %d)\n", MAX_INPUT_LENGTH - 1);
+            while ((c = getchar()) != '\n' && c != EOF) {
+                /* 남은 입력 버퍼 비우기 */
+            }
+            continue;
+        }
+
+        /* [3]/[4] 개행 제거 후 원본 문자열 보관 (히스토리용, 이후 수정하지 않음) */
+        if (len > 0 && line[len - 1] == '\n') {
+            line[len - 1] = '\0';
+        }
+        strncpy(raw_line, line, sizeof(raw_line) - 1);
+        raw_line[sizeof(raw_line) - 1] = '\0';
+        strncpy(command_line, line, sizeof(command_line) - 1);
+        command_line[sizeof(command_line) - 1] = '\0';
+
+        /* [5],[6] 토큰화 + '&' 검사 (line 버퍼는 여기서 파괴됨) */
+        argc = parse_command(line, argv, &background_flag);
+
+        /* [7] 히스토리 동기화: 빈 줄이 아니면 파싱 성공 여부와 무관하게 원본 그대로 저장
+           (03문서 3-1 순서 7, 01문서 8-1) */
+        if (argc != 0) {
+            history_add(&history, raw_line);
+        }
+
+        if (argc == 0) {
+            continue; /* 빈 줄 */
+        }
+        if (argc < 0) {
+            continue; /* 파싱 오류: 메시지는 parse_command에서 이미 출력됨 */
+        }
+
+        /* 03문서 4-4 메시지 포맷과 일치시키기 위해 command_line에서 '&' 제거 */
+        strip_background_marker(command_line, background_flag);
+
+        execute_command(argc, argv, background_flag, command_line, &should_exit, &job_list);
+
+        if (should_exit) {
+            break;
+        }
+    }
+
+    /* 종료 파이프라인: 리스트 노드 -> 히스토리 -> 기타 버퍼 순 (03문서 9장) */
+    free_process_list(&job_list);
+    history_close(&history);
+
+    printf(TU_BLUE "TUK-Shell을 종료합니다.\n" COLOR_RESET);
+    return 0;
+}
+
+#include <stdio.h>
+#include <string.h>
+#include "parser.h"
+#include "tuk_shell.h"
+
+/*
+ * 이번 단계(1단계) 구현 범위:
+ *  - 공백/탭 기준 토큰화
+ *  - 마지막 독립 토큰 "&" 검사 (붙어있는 "cmd&" 형태는 02_인터페이스명세서.md 2-2 기준
+ *    미지원으로 간주 -> 하나의 토큰으로 취급되어 & 판정에서 제외됨)
+ *  - MAX_ARGS 초과 시 오류 처리
+ *  - 리다이렉션('>', '<'), 파이프('|'), 따옴표('"', '\'')는 01_상세기능명세서.md 4-3에 따라
+ *    본 단계 범위 밖이므로 명시적 오류로 거부한다 (execvp에 리터럴 인자로 전달되어
+ *    의도치 않은 동작을 일으키는 것을 방지 - 5단계 테스트에서 실제로 발견된 문제:
+ *    "yes > /dev/null &" 를 그냥 통과시키면 yes가 ">"와 "/dev/null"을 인자로 받아
+ *    무한 반복 출력하며 터미널을 뒤덮는 사고로 이어짐)
+ *
+ * 이 함수는 동적 메모리를 사용하지 않는다(strtok은 line 버퍼를 직접 사용).
+ * 따라서 별도의 free() 지점이 없다.
+ */
+
+/* 토큰 안에 리다이렉션/파이프/따옴표 문자가 있는지 검사 */
+static int has_unsupported_syntax(const char *token)
+{
+    for (; *token != '\0'; token++) {
+        if (*token == '>' || *token == '<' || *token == '|' ||
+            *token == '"' || *token == '\'') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int parse_command(char *line, char **argv, int *background_flag)
+{
+    int argc = 0;
+    int i;
+    char *token;
+    const char *delim = " \t";
+
+    *background_flag = 0;
+
+    /* 빈 줄(공백/탭만 있는 경우 포함) 처리 - 4-2 순서 2번 */
+    token = strtok(line, delim);
+    if (token == NULL) {
+        return 0;
+    }
+
+    while (token != NULL) {
+        if (argc >= MAX_ARGS) {
+            /* 토큰 수 초과 시 잘라서 실행하지 않고 오류만 출력 - 01문서 4-3 */
+            fprintf(stderr, "error: too many arguments (max %d)\n", MAX_ARGS);
+            return -1;
+        }
+        argv[argc++] = token;
+        token = strtok(NULL, delim);
+    }
+    argv[argc] = NULL; /* argv[argc] = NULL 규약 - 02문서 2-2 */
+
+    /* 마지막 토큰이 "&"이면 백그라운드 플래그 설정 후 토큰 목록에서 제거 - 4-2 순서 6번 */
+    if (argc > 0 && strcmp(argv[argc - 1], "&") == 0) {
+        *background_flag = 1;
+        argv[argc - 1] = NULL;
+        argc--;
+    }
+
+    /* 리다이렉션/파이프/따옴표 거부 - 01문서 4-3 */
+    for (i = 0; i < argc; i++) {
+        if (has_unsupported_syntax(argv[i])) {
+            fprintf(stderr,
+                    "error: redirection('>','<'), pipe('|'), quotes are not supported in this stage\n");
+            return -1;
+        }
+    }
+
+    return argc;
+}
+
+void strip_background_marker(char *raw_line, int background_flag)
+{
+    size_t len;
+
+    if (!background_flag || raw_line == NULL) {
+        return;
+    }
+
+    len = strlen(raw_line);
+    while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+        raw_line[--len] = '\0';
+    }
+    if (len > 0 && raw_line[len - 1] == '&') {
+        raw_line[--len] = '\0';
+        while (len > 0 && (raw_line[len - 1] == ' ' || raw_line[len - 1] == '\t')) {
+            raw_line[--len] = '\0';
+        }
+    }
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include "process.h"
+#include "system_info.h"
+#include "tuk_shell.h"
+
+ProcessInfo *create_process_node(pid_t pid, char **argv, const char *raw_command)
+{
+    ProcessInfo *node;
+
+    /*
+     * [malloc 지점 1] 노드 생성.
+     * - 해제 시점: refresh_all_processes()에서 종료가 감지되어 remove_process()가
+     *   호출될 때, 또는 쉘 종료 시 free_process_list()가 호출될 때 free()된다.
+     */
+    node = (ProcessInfo *)malloc(sizeof(ProcessInfo));
+    if (node == NULL) {
+        perror("malloc"); /* 05문서 3-1 */
+        return NULL;      /* 등록 실패: 리스트에 넣지 않고 오류만 출력 (01문서 3-3) */
+    }
+
+    node->pid = pid;
+
+    if (argv != NULL && argv[0] != NULL) {
+        strncpy(node->name, argv[0], PROC_NAME_MAX - 1);
+        node->name[PROC_NAME_MAX - 1] = '\0';
+    } else {
+        node->name[0] = '\0';
+    }
+
+    if (raw_command != NULL) {
+        strncpy(node->command, raw_command, PROC_COMMAND_MAX - 1);
+        node->command[PROC_COMMAND_MAX - 1] = '\0';
+    } else {
+        node->command[0] = '\0';
+    }
+
+    node->start_time = time(NULL);
+    node->cpu_usage = 0.0;
+    node->mem_usage_kb = 0;
+    node->status = PROC_RUNNING;
+    node->exit_code = -1; /* 실행 중 표시 (01문서 3-1) */
+    node->next = NULL;
+
+    return node;
+}
+
+int append_process(ProcessInfo **head, ProcessInfo *node)
+{
+    ProcessInfo *cur;
+
+    if (head == NULL || node == NULL) {
+        return -1;
+    }
+
+    if (*head == NULL) {
+        *head = node;
+        return 0;
+    }
+
+    cur = *head;
+    while (cur->next != NULL) {
+        cur = cur->next;
+    }
+    cur->next = node;
+
+    return 0;
+}
+
+int remove_process(ProcessInfo **head, pid_t pid)
+{
+    ProcessInfo *cur;
+    ProcessInfo *prev;
+
+    if (head == NULL) {
+        return -1;
+    }
+
+    cur = *head;
+    prev = NULL;
+
+    while (cur != NULL) {
+        if (cur->pid == pid) {
+            if (prev == NULL) {
+                *head = cur->next;
+            } else {
+                prev->next = cur->next;
+            }
+            /*
+             * [free 지점 1] 리스트에서 분리한 직후 즉시 해제.
+             * - 종료가 확인된 백그라운드 작업의 정상적인 회수 경로.
+             */
+            free(cur);
+            return 0;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    return -1; /* 대상 PID 없음 */
+}
+
+ProcessInfo *find_process_by_pid(ProcessInfo *head, pid_t pid)
+{
+    ProcessInfo *cur = head;
+
+    while (cur != NULL) {
+        if (cur->pid == pid) {
+            return cur;
+        }
+        cur = cur->next;
+    }
+
+    return NULL;
+}
+
+const char *process_status_to_string(ProcessStatus status)
+{
+    switch (status) {
+        case PROC_RUNNING:
+            return "RUNNING";
+        case PROC_STOPPED:
+            return "STOPPED";
+        case PROC_DONE:
+            return "DONE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+int refresh_all_processes(ProcessInfo **head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *next_node;
+    int wstatus;
+    pid_t result;
+
+    if (head == NULL) {
+        return -1;
+    }
+
+    cur = *head;
+
+    while (cur != NULL) {
+        /* 노드가 이번 반복에서 제거될 수 있으므로 다음 포인터를 미리 저장 */
+        next_node = cur->next;
+
+        result = waitpid(cur->pid, &wstatus, WNOHANG);
+
+        if (result == 0) {
+            /* 아직 종료되지 않음: 통계 갱신 시도 (03문서 5-2 [2]) */
+            if (update_process_stats(cur) != 0) {
+                /* 실패 시 규칙: cpu/mem 0으로, status는 기존 값 유지 (01문서 3-4) */
+                cur->cpu_usage = 0.0;
+                cur->mem_usage_kb = 0;
+            }
+        } else if (result == cur->pid) {
+            /* 종료 확인됨 (03문서 5-2 [4], 5-4 상태 전이) */
+            if (WIFEXITED(wstatus)) {
+                cur->exit_code = WEXITSTATUS(wstatus);
+            } else if (WIFSIGNALED(wstatus)) {
+                cur->exit_code = 128 + WTERMSIG(wstatus);
+            } else {
+                cur->exit_code = -1;
+            }
+            cur->status = PROC_DONE;
+
+            /* 종료 메시지 형식 - 03문서 5-3 */
+            printf(TU_SKY_BLUE "[done] pid=%d exit=%d command=\"%s\"\n" COLOR_RESET,
+                   (int)cur->pid, cur->exit_code, cur->command);
+
+            /* 리스트 제거 + free는 remove_process 내부에서 수행 */
+            remove_process(head, cur->pid);
+        } else {
+            /*
+             * result < 0 (예: ECHILD): 이미 다른 경로로 회수되었거나
+             * 자식이 아닌 경우. 쉘 전체를 중단시키지 않고 다음 노드로 진행한다.
+             */
+        }
+
+        cur = next_node;
+    }
+
+    return 0;
+}
+
+void free_process_list(ProcessInfo **head)
+{
+    ProcessInfo *cur;
+    ProcessInfo *tmp;
+
+    if (head == NULL) {
+        return;
+    }
+
+    cur = *head;
+    while (cur != NULL) {
+        tmp = cur;
+        cur = cur->next;
+        /*
+         * [free 지점 2] 쉘 종료(exit/EOF) 시 잔여 노드 전체 해제.
+         * - 정상적으로 종료를 감지하지 못한 채 쉘이 끝나는 경우의 최종 안전망.
+         */
+        free(tmp);
+    }
+    *head = NULL;
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include "system_info.h"
+
+/* 리눅스 기본값(HZ=100)을 폴백으로 사용, sysconf 실패 시에만 적용 */
+#define DEFAULT_CLK_TCK 100
+
+static long get_clock_ticks_per_sec(void)
+{
+    long ticks = sysconf(_SC_CLK_TCK);
+
+    if (ticks <= 0) {
+        ticks = DEFAULT_CLK_TCK;
+    }
+    return ticks;
+}
+
+/*
+ * read_proc_stat_times
+ *  - /proc/[pid]/stat에서 utime(14번째 필드), stime(15번째 필드)을 파싱한다.
+ *  - comm(2번째 필드)은 괄호로 감싸져 있고 내부에 공백/괄호가 포함될 수 있으므로,
+ *    마지막 ')' 위치를 기준으로 그 뒤부터 상대 위치로 안전하게 파싱한다.
+ *  - 성공 0, 실패(파일 없음/파싱 실패) -1.
+ */
+static int read_proc_stat_times(pid_t pid, unsigned long *utime, unsigned long *stime)
+{
+    char path[64];
+    char buf[512];
+    FILE *fp;
+    char *comm_end;
+    unsigned long ut, st;
+    int n;
+
+    snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return -1; /* 프로세스가 이미 종료되어 접근 불가능한 경우 등 */
+    }
+
+    if (fgets(buf, sizeof(buf), fp) == NULL) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+
+    comm_end = strrchr(buf, ')');
+    if (comm_end == NULL) {
+        return -1;
+    }
+
+    /*
+     * comm_end 다음 필드부터: state(1) ppid(2) pgrp(3) session(4) tty_nr(5)
+     * tpgid(6) flags(7) minflt(8) cminflt(9) majflt(10) cmajflt(11)
+     * utime(12) stime(13) ...  (comm 제외 상대 인덱스 기준)
+     */
+    n = sscanf(comm_end + 1,
+               " %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
+               &ut, &st);
+    if (n != 2) {
+        return -1;
+    }
+
+    *utime = ut;
+    *stime = st;
+    return 0;
+}
+
+/*
+ * read_proc_status_rss
+ *  - /proc/[pid]/status에서 VmRSS(KB) 값을 파싱한다.
+ *  - 성공 0, 실패(파일 없음/필드 없음) -1.
+ */
+static int read_proc_status_rss(pid_t pid, long *rss_kb)
+{
+    char path[64];
+    char line[256];
+    FILE *fp;
+    int found = 0;
+
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            long value;
+            if (sscanf(line + 6, "%ld", &value) == 1) {
+                *rss_kb = value;
+                found = 1;
+            }
+            break;
+        }
+    }
+    fclose(fp);
+
+    return found ? 0 : -1;
+}
+
+int update_process_stats(ProcessInfo *proc)
+{
+    unsigned long utime, stime;
+    long rss_kb;
+    long ticks_per_sec;
+    double total_cpu_seconds;
+    double elapsed_seconds;
+    time_t now;
+
+    if (proc == NULL) {
+        return -1;
+    }
+
+    if (read_proc_stat_times(proc->pid, &utime, &stime) != 0) {
+        return -1; /* 호출부가 cpu=0.0, mem=0으로 처리 (01문서 3-4) */
+    }
+
+    if (read_proc_status_rss(proc->pid, &rss_kb) != 0) {
+        return -1;
+    }
+
+    ticks_per_sec = get_clock_ticks_per_sec();
+    total_cpu_seconds = (double)(utime + stime) / (double)ticks_per_sec;
+
+    now = time(NULL);
+    elapsed_seconds = difftime(now, proc->start_time);
+    if (elapsed_seconds <= 0.0) {
+        elapsed_seconds = 1.0; /* 등록 직후 0으로 나누기 방지 */
+    }
+
+    /* [설계 노트] system_info.h 주석 참고: "시작 이후 누적 평균 CPU 점유율" */
+    proc->cpu_usage = (total_cpu_seconds / elapsed_seconds) * 100.0;
+    proc->mem_usage_kb = rss_kb;
+
+    return 0;
+}
+
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c11 -Iinclude
+SRC_DIR = src
+BUILD_DIR = build
+TARGET = tuk_shell
+
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/parser.c $(SRC_DIR)/commands.c $(SRC_DIR)/executor.c \
+       $(SRC_DIR)/process.c $(SRC_DIR)/system_info.c $(SRC_DIR)/history.c \
+       $(SRC_DIR)/campus.c
+OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+clean:
+	rm -rf $(BUILD_DIR) $(TARGET)
+
+.PHONY: all clean
+
+너 토큰을 다 써버려서 다른 ai와 직업 작업해서 7단계까지 모두 완성시켰어.
+이제 내가 바라는 건 다음과 같아. (프로젝트 완성)
+스케쥴, 버스 명령어 사용 시 보기 좋게.
+그리고 현재 딱 접속했을 때 다른 os처럼 멋있게 아이콘을 출력하고 WELCOME TO TUK OS 를 출력해주는데 이걸 더 멋있게 꾸며주고 진짜 os 처럼 꾸며줘.
+그러면 main.c가 100줄이 넘어가겠지? 그러니까 새로 파일을 만들어도 좋아.
+작업 시작해줘

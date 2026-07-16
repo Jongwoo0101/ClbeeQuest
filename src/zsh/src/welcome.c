@@ -1,19 +1,31 @@
 #include <stdio.h>
-#include <unistd.h>
+#include <time.h> /* usleep 대신 nanosleep 사용을 위해 추가 */
 #include "welcome.h"
 #include "tuk_shell.h"
+
+/* 밀리초(ms) 단위 지연 함수 (usleep 대체) */
+static void sleep_ms(long ms)
+{
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
 
 void print_welcome_screen(void)
 {
     /* 가상 OS 부팅 시퀀스 느낌을 위한 딜레이와 메시지 */
     printf(TU_SKY_BLUE "Booting TUK-OS (x86_64-apple-darwin) ...\n" COLOR_RESET);
-    usleep(200000);
+    sleep_ms(200); /* 200,000us = 200ms */
+    
     printf(TU_SKY_BLUE "Loading kernel modules" COLOR_RESET " ... [OK]\n");
-    usleep(150000);
+    sleep_ms(150);
+    
     printf(TU_SKY_BLUE "Mounting virtual file systems" COLOR_RESET " ... [OK]\n");
-    usleep(150000);
+    sleep_ms(150);
+    
     printf(TU_SKY_BLUE "Starting background services" COLOR_RESET " ... [OK]\n");
-    usleep(100000);
+    sleep_ms(100);
     printf("\n");
 
     /* 한국공학대학교 결정체(육각형) 로고 확장 및 OS 타이틀 */

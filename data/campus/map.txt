@@ -1,0 +1,36 @@
+# map.txt - 캠퍼스 건물/편의시설/강의실 안내
+# BUILDING|code|name|floor|floor_desc
+# FAC|name|location
+# ROOM|room_no|building|floor|desc
+BUILDING|-A|A동 (본관)|1|행정실, 총학생회실
+BUILDING|-A|A동 (본관)|2|대강당
+BUILDING|-A|A동 (본관)|3|교수연구실
+BUILDING|-B|B동 (강의동)|1|라운지, 편의점
+BUILDING|-B|B동 (강의동)|2|강의실 201~210
+BUILDING|-B|B동 (강의동)|3|강의실 301~310
+BUILDING|-C|C동 (실습동)|1|실습실 101~105
+BUILDING|-C|C동 (실습동)|2|컴퓨터실습실 201~205
+BUILDING|-D|D동 (도서관)|1|자료실, 대출데스크
+BUILDING|-D|D동 (도서관)|2|열람실
+BUILDING|-D|D동 (도서관)|3|스터디룸
+BUILDING|-E|E동 (공학관)|1|로비, 카페
+BUILDING|-E|E동 (공학관)|2|강의실 201~210
+BUILDING|-E|E동 (공학관)|3|강의실 301~310
+BUILDING|-E|E동 (공학관)|4|인공지능 특화 강의실
+BUILDING|-E|E동 (공학관)|5|캡스톤디자인실
+BUILDING|-F|F동 (학생회관)|1|동아리방, 매점
+BUILDING|-F|F동 (학생회관)|2|체육시설
+BUILDING|-G|G동 (기숙사)|1|관리사무소, 세탁실
+BUILDING|-G|G동 (기숙사)|2-5|생활관
+FAC|학생식당 TIP|TIP 지하 1층
+FAC|E동 레스토랑|E동 1층
+FAC|대신식당|본관 옆 별관
+FAC|교내 편의점(CU)|B동 1층
+FAC|무인 프린트샵|D동 1층, E동 1층
+FAC|ATM(하나은행)|A동 1층 로비
+FAC|보건실|A동 1층
+FAC|체육관|F동 2층
+ROOM|B101|B동|1|라운지 옆 소강의실
+ROOM|E401|E동|4|인공지능 특화 강의실
+ROOM|E501|E동|5|캡스톤디자인실
+ROOM|D201|D동|2|도서관 열람실

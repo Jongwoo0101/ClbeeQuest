@@ -12,6 +12,7 @@
 #include "parser.h"
 #include "process.h"
 #include "tuk_shell.h" /* TUK_COLOR_SKY: 종료 알림 색상 */
+#include "welcome.h"
 
 /* 02_인터페이스명세서 4-1: REPL 루프. 쉘 종료 코드를 반환한다. */
 int shell_loop(void)
@@ -58,6 +59,9 @@ int shell_loop(void)
 
 int main(void)
 {
+    /* 가상 OS 부팅 시퀀스 및 로고 출력 */
+    print_welcome_screen();
+
     /* 03 2-1 초기화: 리스트 헤드는 process.c에서 NULL로 시작.
      * 히스토리 실패 시 내부에서 경고만 출력하고 기능을 비활성화한다. */
     history_init();

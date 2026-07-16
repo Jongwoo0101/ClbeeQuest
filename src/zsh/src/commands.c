@@ -7,9 +7,9 @@
 #include "process.h"
 #include "tuk_shell.h"
 
-/* 3단계 기준 내장 명령어 목록. top은 4단계에서 추가된다. */
-static const char *BUILTIN_NAMES[] = { "cd", "pwd", "help", "exit", "jobs" };
-static const int BUILTIN_COUNT = 5;
+/* 4단계 기준 내장 명령어 목록. */
+static const char *BUILTIN_NAMES[] = { "cd", "pwd", "help", "exit", "jobs", "top" };
+static const int BUILTIN_COUNT = 6;
 
 int is_builtin(const char *cmd)
 {
@@ -87,7 +87,7 @@ int handle_help(int argc, char **argv)
         return 1;
     }
 
-    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [3단계]\n" COLOR_RESET);
+    printf(TU_BLUE "TUK-Shell (ZSH Part) - 사용 가능한 명령어 [4단계]\n" COLOR_RESET);
     printf("  cd [path]           작업 디렉토리 변경 (인자 없으면 HOME 이동)\n");
     printf("  pwd                 현재 작업 디렉토리 출력\n");
     printf("  help                이 도움말 출력\n");
@@ -95,10 +95,13 @@ int handle_help(int argc, char **argv)
     printf("  jobs                전체 백그라운드 작업 목록 출력\n");
     printf("  jobs -pid [PID]     PID로 작업 검색\n");
     printf("  jobs -name [NAME]   이름(부분 문자열)으로 작업 검색\n");
+    printf("  top -cpu            CPU 사용량 내림차순 정렬 출력\n");
+    printf("  top -mem            메모리 사용량 내림차순 정렬 출력\n");
+    printf("  top -time           실행시간 내림차순 정렬 출력\n");
     printf("  [cmd] [args]        외부 명령어 실행 (fork + execvp)\n");
     printf("  [cmd] [args] &      백그라운드 실행 및 작업 등록\n");
     printf("\n"
-           "※ top, schedule, bus, bob, notice, map, weather, contact 명령어는\n"
+           "※ schedule, bus, bob, notice, map, weather, contact 명령어는\n"
            "  plan.md 개발 순서에 따라 이후 단계에서 순차적으로 추가됩니다.\n");
 
     return 0;
@@ -273,6 +276,99 @@ int handle_jobs(int argc, char **argv, ProcessInfo **job_list)
     return 1;
 }
 
+/*
+ * TopEntry
+ *  - 정렬 기준(-cpu/-mem/-time)에 따라 미리 계산해 둔 metric 값과 원본 노드
+ *    포인터를 함께 담는다. qsort 콜백은 이 metric만 비교하면 되므로
+ *    옵션별 분기를 컴페어 함수 밖에서 한 번만 처리할 수 있다.
+ */
+typedef struct {
+    ProcessInfo *proc;
+    double metric;
+} TopEntry;
+
+/* 내림차순 비교 콜백 (01문서 7-3 "비교 함수는 직접 구현") */
+static int compare_top_entry_desc(const void *a, const void *b)
+{
+    const TopEntry *ea = (const TopEntry *)a;
+    const TopEntry *eb = (const TopEntry *)b;
+
+    if (ea->metric < eb->metric) {
+        return 1;
+    }
+    if (ea->metric > eb->metric) {
+        return -1;
+    }
+    return 0;
+}
+
+int handle_top(int argc, char **argv, ProcessInfo **job_list)
+{
+    ProcessInfo *cur;
+    TopEntry *entries;
+    int count;
+    int i;
+    time_t now;
+
+    /* 03문서 6-2: top 호출 -> 백그라운드 상태 갱신 먼저 */
+    refresh_all_processes(job_list);
+
+    /* 옵션이 없거나 2개 이상이면 사용법 출력 (01문서 7-4) */
+    if (argc != 2) {
+        fprintf(stderr, "usage: top -cpu | top -mem | top -time\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "-cpu") != 0 &&
+        strcmp(argv[1], "-mem") != 0 &&
+        strcmp(argv[1], "-time") != 0) {
+        fprintf(stderr, "invalid top option\n");
+        return 1;
+    }
+
+    count = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next) {
+        count++;
+    }
+
+    if (count == 0) {
+        printf("No background jobs.\n"); /* 01문서 7-3 */
+        return 0;
+    }
+
+    /* 리스트를 출력용 배열로 복사 - 원본 연결 리스트는 정렬하지 않는다 (01문서 7-3) */
+    entries = (TopEntry *)malloc(sizeof(TopEntry) * (size_t)count);
+    if (entries == NULL) {
+        perror("malloc");
+        return -1;
+    }
+
+    now = time(NULL);
+    i = 0;
+    for (cur = *job_list; cur != NULL; cur = cur->next, i++) {
+        entries[i].proc = cur;
+        if (strcmp(argv[1], "-cpu") == 0) {
+            entries[i].metric = cur->cpu_usage;
+        } else if (strcmp(argv[1], "-mem") == 0) {
+            entries[i].metric = (double)cur->mem_usage_kb;
+        } else { /* -time: 현재 시각 - start_time 내림차순 (01문서 7-2) */
+            entries[i].metric = difftime(now, cur->start_time);
+        }
+    }
+
+    qsort(entries, (size_t)count, sizeof(TopEntry), compare_top_entry_desc);
+
+    print_jobs_header();
+    for (i = 0; i < count; i++) {
+        print_job_row(i + 1, entries[i].proc);
+    }
+
+    /* [free] 정렬용 임시 배열 해제 - 원본 ProcessInfo 노드는 그대로 리스트 소유 (03문서 6-2) */
+    free(entries);
+
+    return 0;
+}
+
 int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_list)
 {
     *should_exit = 0;
@@ -285,6 +381,8 @@ int execute_builtin(int argc, char **argv, int *should_exit, ProcessInfo **job_l
         return handle_help(argc, argv);
     } else if (strcmp(argv[0], "jobs") == 0) {
         return handle_jobs(argc, argv, job_list);
+    } else if (strcmp(argv[0], "top") == 0) {
+        return handle_top(argc, argv, job_list);
     } else if (strcmp(argv[0], "exit") == 0) {
         int result = handle_exit(argc, argv);
         if (result == 0) {

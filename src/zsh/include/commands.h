@@ -19,9 +19,18 @@ int handle_exit(int argc, char **argv);
 int handle_jobs(int argc, char **argv, ProcessInfo **job_list);
 
 /*
+ * handle_top
+ *  - top -cpu / top -mem / top -time 처리 (01_상세기능명세서.md 7장).
+ *  - 원본 연결 리스트는 훼손하지 않고, 출력용 배열로 복사한 뒤 qsort()로 정렬한다
+ *    (01문서 7-3, 03_파이프라인명세서.md 6-2).
+ *  - 반환값: 0 정상(활성 작업 0개도 정상), 1 사용법/옵션 오류, -1 치명적 오류(malloc 실패)
+ */
+int handle_top(int argc, char **argv, ProcessInfo **job_list);
+
+/*
  * is_builtin
  *  - cmd가 내장 명령어 이름이면 1, 아니면 0.
- *  - top은 4단계에서 목록에 추가될 예정 (현재는 cd/pwd/help/exit/jobs 인식).
+ *  - 현재 cd/pwd/help/exit/jobs/top 인식 (4단계 기준).
  */
 int is_builtin(const char *cmd);
 

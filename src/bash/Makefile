@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -Iinclude
+CFLAGS = -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Iinclude
 TARGET = tuk_shell
 SRC_DIR = src
 BUILD_DIR = build

@@ -1,2 +1,2 @@
 CompileFlags:
-  Add: [-Iinclude, -std=c11, -Wall, -Wextra]
+  Add: [-Iinclude, -std=c11, -Wall, -Wextra, -D_POSIX_C_SOURCE=200809L, -D_DEFAULT_SOURCE]
